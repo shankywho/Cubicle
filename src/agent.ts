@@ -127,7 +127,7 @@ export class AgentNode {
   }
 
   /**
-   * Universal recursive task processing loop wired to real Claude API.
+   * Universal recursive task processing loop wired to real Groq API.
    */
   public async handle(task: Task, forcePass: boolean = false): Promise<TaskResult> {
     // 1. Mark task started and emit event
@@ -141,7 +141,7 @@ export class AgentNode {
 
     const isLeaf = task.depth >= this.depthLimit;
 
-    // 2. Leaf Agent execution with real Claude API
+    // 2. Leaf Agent execution with real Groq API
     if (isLeaf) {
       this.profile.perf.attempted++;
       const execResult = await executeTask(this.profile.systemPrompt, task.description);
