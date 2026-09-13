@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { AgentNode } from "./agent.js";
 import { EventBus } from "./eventBus.js";
 import type { Agent, OrgEvent, Task } from "./types.js";
