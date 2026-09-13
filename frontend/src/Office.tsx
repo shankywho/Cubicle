@@ -1,9 +1,10 @@
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Text } from "@react-three/drei";
-import { useOrgStore, type Agent } from "./store";
+import { useOrgStore } from "./store";
+import { AgentAvatar } from "./AgentAvatar";
 
 // Defined 3D positions for the 8 workstations + CEO desk
-const DESK_CONFIG: Record<string, [number, number, number]> = {
+export const DESK_CONFIG: Record<string, [number, number, number]> = {
   "desk-ceo": [0, 0.4, 3.8],
   "desk-1": [-3.6, 0.4, 1.8],
   "desk-2": [-1.2, 0.4, 1.8],
@@ -15,18 +16,7 @@ const DESK_CONFIG: Record<string, [number, number, number]> = {
   "desk-8": [3.6, 0.4, -1.2],
 };
 
-// Distinct signature colors for skill roles
-const SKILL_COLORS: Record<string, string> = {
-  "ceo": "#f59e0b",              // Amber/Gold
-  "manager-research": "#3b82f6", // Blue
-  "manager-synthesis": "#8b5cf6",// Purple
-  "web-research": "#06b6d4",     // Cyan
-  "data-analysis": "#10b981",    // Emerald
-  "writing": "#f97316",          // Orange
-  "critique": "#ef4444",         // Red
-};
-
-function getDeskPos(deskId: string, idx: number): [number, number, number] {
+export function getDeskPos(deskId: string, idx: number): [number, number, number] {
   if (DESK_CONFIG[deskId]) {
     return DESK_CONFIG[deskId];
   }
@@ -55,49 +45,6 @@ function Desk({ id, position }: { id: string; position: [number, number, number]
         color="#94a3b8"
       >
         {id.toUpperCase()}
-      </Text>
-    </group>
-  );
-}
-
-/**
- * 3D Agent Avatar component rendered as a colored capsule with floating nameplate
- */
-function AgentAvatar({ agent, position }: { agent: Agent; position: [number, number, number] }) {
-  const color = SKILL_COLORS[agent.skill] || "#64748b";
-
-  return (
-    <group position={[position[0], position[1] + 0.65, position[2] + 0.65]}>
-      {/* Avatar Capsule */}
-      <mesh castShadow>
-        <capsuleGeometry args={[0.22, 0.6, 8, 16]} />
-        <meshStandardMaterial color={color} roughness={0.3} metalness={0.3} />
-      </mesh>
-
-      {/* Floating Nameplate */}
-      <Text
-        position={[0, 0.75, 0]}
-        fontSize={0.14}
-        color="#ffffff"
-        anchorX="center"
-        anchorY="middle"
-        outlineWidth={0.015}
-        outlineColor="#0f172a"
-      >
-        {agent.name}
-      </Text>
-
-      {/* Skill Role Badge */}
-      <Text
-        position={[0, 0.58, 0]}
-        fontSize={0.09}
-        color={color}
-        anchorX="center"
-        anchorY="middle"
-        outlineWidth={0.01}
-        outlineColor="#0f172a"
-      >
-        {agent.skill}
       </Text>
     </group>
   );
