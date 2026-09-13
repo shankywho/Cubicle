@@ -1,7 +1,6 @@
-import React from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Text } from "@react-three/drei";
-import { useOrgStore, Agent } from "./store";
+import { useOrgStore, type Agent } from "./store";
 
 // Defined 3D positions for the 8 workstations + CEO desk
 const DESK_CONFIG: Record<string, [number, number, number]> = {
