@@ -33,6 +33,5 @@ Thumbs.db
 *.swp
 *.swo
 
-# Run data & scratch
-runs/*.jsonl
+# Scratch
 scratch/

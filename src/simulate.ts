@@ -1,4 +1,6 @@
 import "dotenv/config";
+import fs from "node:fs";
+import path from "node:path";
 import { AgentNode } from "./agent.js";
 import { EventBus } from "./eventBus.js";
 import type { Agent, OrgEvent, Task } from "./types.js";
@@ -110,9 +112,18 @@ async function main() {
     ts: Date.now(),
   });
 
+  // 4. Capture run into runs/run-001.jsonl
+  const runsDir = path.resolve(process.cwd(), "runs");
+  if (!fs.existsSync(runsDir)) {
+    fs.mkdirSync(runsDir, { recursive: true });
+  }
+  const runFilePath = path.join(runsDir, "run-001.jsonl");
+  fs.copyFileSync(eventBus.getLogPath(), runFilePath);
+
   console.log("\n===============================================================");
   console.log(`✅ Simulation successfully executed!`);
   console.log(`📝 Event log written to: ${eventBus.getLogPath()}`);
+  console.log(`💾 Captured end-to-end run saved to: ${runFilePath}`);
   console.log("===============================================================\n");
 }
 
