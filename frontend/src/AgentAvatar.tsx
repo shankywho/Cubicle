@@ -1,6 +1,6 @@
-import { useRef } from "react";
+import { useRef, useState, useEffect, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
-import { Text } from "@react-three/drei";
+import { Text, Html } from "@react-three/drei";
 import { useSpring, animated } from "@react-spring/three";
 import * as THREE from "three";
 import { useOrgStore, type Agent } from "./store";
@@ -32,6 +32,43 @@ export function AgentAvatar({ agent, position }: AgentAvatarProps) {
   );
 
   const isFired = agent.status === "fired";
+
+  // Check messages for this agent
+  const messages = useOrgStore((state) => state.messages);
+  const latestMessage = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].fromAgentId === agent.id) {
+        return messages[i];
+      }
+    }
+    return null;
+  }, [messages, agent.id]);
+
+  const [activeBubble, setActiveBubble] = useState<string | null>(null);
+
+  // Automatically unmount/hide chat bubble after 4 seconds
+  useEffect(() => {
+    if (!latestMessage) {
+      setActiveBubble(null);
+      return;
+    }
+
+    const elapsed = Date.now() - latestMessage.ts;
+    const remaining = 4000 - elapsed;
+
+    if (remaining <= 0) {
+      setActiveBubble(null);
+      return;
+    }
+
+    setActiveBubble(latestMessage.content);
+
+    const timer = setTimeout(() => {
+      setActiveBubble(null);
+    }, remaining);
+
+    return () => clearTimeout(timer);
+  }, [latestMessage]);
 
   // Animate scale from 0 to 1 upon spawn/hire, and back to 0 if fired
   const { springScale } = useSpring({
@@ -114,6 +151,55 @@ export function AgentAvatar({ agent, position }: AgentAvatarProps) {
       >
         {agent.skill}
       </Text>
+
+      {/* Transient 3D Chat Bubble positioned above the agent's head */}
+      {activeBubble && (
+        <Html
+          position={[0, 1.25, 0]}
+          center
+          distanceFactor={10}
+          style={{ pointerEvents: "none" }}
+        >
+          <div
+            style={{
+              position: "relative",
+              background: "rgba(15, 23, 42, 0.94)",
+              backdropFilter: "blur(12px)",
+              border: `1.5px solid ${color}`,
+              boxShadow: `0 8px 24px rgba(0, 0, 0, 0.6), 0 0 14px ${color}40`,
+              color: "#f8fafc",
+              padding: "7px 12px",
+              borderRadius: "10px",
+              fontSize: "11px",
+              fontWeight: 600,
+              width: "max-content",
+              maxWidth: "200px",
+              textAlign: "center",
+              lineHeight: 1.35,
+              wordBreak: "break-word",
+              whiteSpace: "normal",
+              transform: "translateY(-4px)",
+              animation: "fadeIn 0.2s ease-out",
+            }}
+          >
+            {activeBubble}
+            {/* Triangular pointer */}
+            <div
+              style={{
+                position: "absolute",
+                bottom: -6,
+                left: "50%",
+                transform: "translateX(-50%)",
+                width: 0,
+                height: 0,
+                borderLeft: "6px solid transparent",
+                borderRight: "6px solid transparent",
+                borderTop: `6px solid ${color}`,
+              }}
+            />
+          </div>
+        </Html>
+      )}
     </animated.group>
   );
 }

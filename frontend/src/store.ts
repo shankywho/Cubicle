@@ -44,6 +44,14 @@ export interface TaskTreeNode extends Task {
   children: TaskTreeNode[];
 }
 
+export interface AgentMessage {
+  id: string;
+  fromAgentId: string;
+  toAgentId?: string;
+  content: string;
+  ts: number;
+}
+
 export type OrgEvent =
   | { type: "job.started"; jobId: string; brief: string; ts: number }
   | { type: "agent.hired"; agent: Agent; ts: number }
@@ -54,12 +62,13 @@ export type OrgEvent =
   | { type: "task.started"; taskId: string; ts: number }
   | { type: "task.result"; taskId: string; result: TaskResult; ts: number }
   | { type: "task.retry"; taskId: string; attempt: number; feedback: string; ts: number }
-  | { type: "message"; fromAgentId: string; toAgentId: string; content: string; ts: number }
+  | { type: "message"; fromAgentId: string; toAgentId?: string; content: string; ts: number }
   | { type: "job.completed"; jobId: string; finalResult: TaskResult; ts: number };
 
 interface OrgStore {
   agents: Agent[];
   tasks: Task[];
+  messages: AgentMessage[];
   events: OrgEvent[];
   connected: boolean;
   jobId: string | null;
@@ -68,12 +77,14 @@ interface OrgStore {
   removeAgent: (agentId: string) => void;
   addTask: (task: Task) => void;
   updateTask: (taskId: string, patch: Partial<Task>) => void;
+  addMessage: (msg: { fromAgentId: string; toAgentId?: string; content: string; ts?: number }) => void;
   clearState: () => void;
 }
 
 export const useOrgStore = create<OrgStore>((set) => ({
   agents: [],
   tasks: [],
+  messages: [],
   events: [],
   connected: false,
   jobId: null,
@@ -99,10 +110,25 @@ export const useOrgStore = create<OrgStore>((set) => ({
       tasks: state.tasks.map((t) => (t.id === taskId ? { ...t, ...patch } : t)),
     })),
 
+  addMessage: (msg) =>
+    set((state) => ({
+      messages: [
+        ...state.messages,
+        {
+          id: Math.random().toString(36).substring(2, 9),
+          fromAgentId: msg.fromAgentId,
+          toAgentId: msg.toAgentId,
+          content: msg.content,
+          ts: msg.ts || Date.now(),
+        },
+      ],
+    })),
+
   clearState: () =>
     set({
       agents: [],
       tasks: [],
+      messages: [],
       events: [],
       jobStatus: "idle",
       jobId: null,
@@ -173,14 +199,25 @@ socket.on("orgEvent", (event: OrgEvent) => {
         jobStatus: "running",
         agents: [],
         tasks: [],
+        messages: [],
       });
       break;
 
     case "agent.hired":
       store.addAgent(event.agent);
+      store.addMessage({
+        fromAgentId: event.agent.id,
+        content: `Reporting for duty as ${event.agent.skill}!`,
+        ts: event.ts,
+      });
       break;
 
     case "agent.fired":
+      store.addMessage({
+        fromAgentId: event.agentId,
+        content: "Offboarded due to quality metrics ❌",
+        ts: event.ts,
+      });
       store.removeAgent(event.agentId);
       break;
 
@@ -199,21 +236,60 @@ socket.on("orgEvent", (event: OrgEvent) => {
       store.updateTask(event.taskId, { ownerAgentId: event.agentId });
       break;
 
-    case "task.started":
+    case "task.started": {
       store.updateTask(event.taskId, { status: "in_progress" });
+      const currentTask = store.tasks.find((t) => t.id === event.taskId);
+      if (currentTask?.ownerAgentId) {
+        store.addMessage({
+          fromAgentId: currentTask.ownerAgentId,
+          content: `Working: "${currentTask.description.slice(0, 42)}..."`,
+          ts: event.ts,
+        });
+      }
       break;
+    }
 
-    case "task.result":
+    case "task.result": {
       store.updateTask(event.taskId, {
         result: event.result,
         status: event.result.verdict === "pass" ? "completed" : "failed",
       });
+      const currentTask = store.tasks.find((t) => t.id === event.taskId);
+      if (currentTask?.ownerAgentId) {
+        store.addMessage({
+          fromAgentId: currentTask.ownerAgentId,
+          content:
+            event.result.verdict === "pass"
+              ? "Completed & passed review! ✅"
+              : "Quality critique failed ⚠️",
+          ts: event.ts,
+        });
+      }
       break;
+    }
 
-    case "task.retry":
+    case "task.retry": {
       store.updateTask(event.taskId, {
         status: "retrying",
         attempt: event.attempt,
+      });
+      const currentTask = store.tasks.find((t) => t.id === event.taskId);
+      if (currentTask?.ownerAgentId) {
+        store.addMessage({
+          fromAgentId: currentTask.ownerAgentId,
+          content: `Refining deliverable (attempt #${event.attempt})...`,
+          ts: event.ts,
+        });
+      }
+      break;
+    }
+
+    case "message":
+      store.addMessage({
+        fromAgentId: event.fromAgentId,
+        toAgentId: event.toAgentId,
+        content: event.content,
+        ts: event.ts,
       });
       break;
 
