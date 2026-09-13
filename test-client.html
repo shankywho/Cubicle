@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Autonomous AI Org — Live Event Stream</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+      background-color: #0f172a;
+      color: #f8fafc;
+      padding: 24px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid #334155;
+    }
+    h1 {
+      font-size: 20px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .badge.connected {
+      background: #14532d;
+      color: #86efac;
+    }
+    .badge.disconnected {
+      background: #7f1d1d;
+      color: #fca5a5;
+    }
+    .controls {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    button {
+      background: #3b82f6;
+      color: white;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button:hover {
+      background: #2563eb;
+    }
+    button:disabled {
+      background: #475569;
+      cursor: not-allowed;
+    }
+    #counter {
+      color: #94a3b8;
+      font-size: 14px;
+      align-self: center;
+    }
+    pre#events {
+      background: #020617;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 16px;
+      height: 75vh;
+      overflow-y: auto;
+      font-family: "SF Mono", Monaco, Menlo, monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #38bdf8;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+  </style>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>🏢 Autonomous AI Org: Live Event Stream</h1>
+    <span id="status" class="badge disconnected">Connecting...</span>
+  </header>
+
+  <div class="controls">
+    <button id="start-btn">Start Job (Phase 0 Brief)</button>
+    <button id="clear-btn" style="background: #334155;">Clear Log</button>
+    <span id="counter">Events received: 0</span>
+  </div>
+
+  <pre id="events">// Waiting for incoming events from http://localhost:3000...</pre>
+
+  <script>
+    const statusEl = document.getElementById("status");
+    const eventsEl = document.getElementById("events");
+    const startBtn = document.getElementById("start-btn");
+    const clearBtn = document.getElementById("clear-btn");
+    const counterEl = document.getElementById("counter");
+
+    let count = 0;
+
+    // Connect to Socket.IO event server
+    const socket = io("http://localhost:3000");
+
+    socket.on("connect", () => {
+      statusEl.textContent = `Connected (${socket.id})`;
+      statusEl.className = "badge connected";
+    });
+
+    socket.on("disconnect", () => {
+      statusEl.textContent = "Disconnected";
+      statusEl.className = "badge disconnected";
+    });
+
+    // Listen for broadcasted orgEvent
+    socket.on("orgEvent", (event) => {
+      if (count === 0) {
+        eventsEl.textContent = "";
+      }
+      count++;
+      counterEl.textContent = `Events received: ${count}`;
+
+      const timestamp = new Date(event.ts).toLocaleTimeString();
+      const line = `[${timestamp}] [${event.type}] ` + JSON.stringify(event, null, 2) + "\n\n";
+      eventsEl.textContent += line;
+      eventsEl.scrollTop = eventsEl.scrollHeight;
+    });
+
+    // Trigger POST /jobs on click
+    startBtn.addEventListener("click", async () => {
+      startBtn.disabled = true;
+      startBtn.textContent = "Starting...";
+
+      const defaultBrief =
+        "Research the competitive landscape for modern AI code editors (analyzing Cursor, Windsurf, and GitHub Copilot Workspace), evaluate their core strengths, weaknesses, and pricing, and produce a formal decision memo with a strategic recommendation for our engineering team.";
+
+      try {
+        const res = await fetch("http://localhost:3000/jobs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ brief: defaultBrief }),
+        });
+
+        const data = await res.json();
+        console.log("Job response:", data);
+        startBtn.textContent = `Running Job (${data.jobId})`;
+      } catch (err) {
+        console.error("Failed to start job:", err);
+        alert("Failed to start job. Make sure the server is running on http://localhost:3000");
+        startBtn.disabled = false;
+        startBtn.textContent = "Start Job (Phase 0 Brief)";
+      }
+    });
+
+    clearBtn.addEventListener("click", () => {
+      count = 0;
+      counterEl.textContent = "Events received: 0";
+      eventsEl.textContent = "// Cleared.\n";
+      startBtn.disabled = false;
+      startBtn.textContent = "Start Job (Phase 0 Brief)";
+    });
+  </script>
+</body>
+</html>
