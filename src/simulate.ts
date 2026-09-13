@@ -113,7 +113,7 @@ async function main() {
     ts: Date.now(),
   });
 
-  // 4. Capture run into runs/run-001.jsonl
+  // 4. Capture real end-to-end Groq run into runs/run-001.jsonl
   const runsDir = path.resolve(process.cwd(), "runs");
   if (!fs.existsSync(runsDir)) {
     fs.mkdirSync(runsDir, { recursive: true });
@@ -124,7 +124,7 @@ async function main() {
   console.log("\n===============================================================");
   console.log(`✅ Simulation successfully executed!`);
   console.log(`📝 Event log written to: ${eventBus.getLogPath()}`);
-  console.log(`💾 Captured end-to-end run saved to: ${runFilePath}`);
+  console.log(`💾 Captured real end-to-end run saved to: ${runFilePath}`);
   console.log("===============================================================\n");
 }
 
