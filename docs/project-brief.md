@@ -28,3 +28,19 @@ The following predefined skill templates populate the initial Skill Registry:
 | `data-analysis` | Leaf Worker | `code_execution` | Normalizes and scores competitor attributes; computes comparative metrics; generates structured feature and pricing matrices. |
 | `writing` | Leaf Worker | Document generation | Drafts strategic, high-clarity decision memos, synthesizing research and data tables into cohesive prose. |
 | `critique` | Leaf Worker | Rubric evaluation | Evaluates draft deliverables against strict criteria (factual rigor, structure, rubric score ≥ 8/10). Issues pass/fail verdicts with actionable feedback. |
+
+## 3. Success Criteria
+
+The job is considered successfully fulfilled when the following criteria are met:
+
+1. **Final Decision Memo Artifact**:
+   - Delivered as a formatted Markdown document (with downloadable PDF export support).
+   - Contains:
+     - **Executive Summary**: High-level synthesis with an actionable engineering recommendation.
+     - **Comparative Feature Matrix**: Comprehensive tabular comparison covering AI models used, indexing speed, multi-file edit capabilities, context retention, and pricing tiers.
+     - **Competitor Profiles**: In-depth analysis of Cursor, Windsurf, and GitHub Copilot Workspace.
+2. **Critique Agent Sign-Off**:
+   - The document receives a formal passing verdict (`verdict: "pass"`) from the `critique` agent based on rubric benchmarks (relevance, accuracy, clarity, and completeness).
+3. **Execution Integrity**:
+   - The complete event lifecycle (`job.started` through `job.completed`) is cleanly recorded to `event_log.jsonl`.
+   - Any agent failure during draft generation triggers the designated retry/fire-and-rehire mechanism and recovers automatically to produce the final deliverable.
