@@ -48,8 +48,8 @@ export class AgentNode {
   }
 
   /**
-   * Find template in registry.json and instantiate agent.
-   * If feedback is provided, inject corrective directive into the system prompt.
+   * Finds or instantiates an agent for the specified skill directly from registry.json.
+   * If feedback is provided (rehire after firing), dynamically injects the corrective feedback.
    */
   public findOrHire(requiredSkill: string, feedback?: string): Agent {
     const registryPath = path.resolve(process.cwd(), "src/skills/registry.json");
@@ -60,13 +60,14 @@ export class AgentNode {
       throw new Error(`Skill template not found in registry for key: "${requiredSkill}"`);
     }
 
-    const id = `agent-${template.key}-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+    const agentIndex = agentCounter++;
+    const id = `agent-${template.key}-${agentIndex}`;
     const deskId = `desk-${deskCounter++}`;
     const isRehire = Boolean(feedback);
 
     let systemPrompt = template.promptFragment;
     if (feedback) {
-      systemPrompt += `\n\nIMPORTANT CORRECTIVE DIRECTIVE: ${feedback}`;
+      systemPrompt += `\n\nIMPORTANT CORRECTIVE DIRECTIVE: Avoid previous failure mode: ${feedback}. Adhere strictly to verified benchmarks.`;
     }
 
     const nameMap: Record<string, string> = {
@@ -78,7 +79,7 @@ export class AgentNode {
       "critique": "Rubric Critic",
     };
     const roleBaseName = nameMap[template.key] || template.key;
-    const name = isRehire ? `Replacement ${roleBaseName} #${agentCounter++}` : `${roleBaseName} #${agentCounter++}`;
+    const name = isRehire ? `Replacement ${roleBaseName} #${agentIndex}` : `${roleBaseName} #${agentIndex}`;
 
     const agent: Agent = {
       id,
@@ -116,6 +117,7 @@ export class AgentNode {
 
     // 2. Leaf Agent execution
     if (isLeaf) {
+      this.profile.perf.attempted++;
       const execResult = await mockExecute(this.profile, task);
       const critique = forcePass
         ? { verdict: "pass" as const, reason: "Verified and approved by quality verifier on retry." }
@@ -128,10 +130,15 @@ export class AgentNode {
         task.status = "completed";
       } else {
         task.status = "failed";
+        this.profile.perf.failed++;
       }
 
+      this.profile.perf.avgConfidence = +(
+        (this.profile.perf.avgConfidence * (this.profile.perf.attempted - 1) + execResult.confidence) /
+        this.profile.perf.attempted
+      ).toFixed(2);
+
       task.result = execResult;
-      this.profile.perf.attempted++;
 
       this.eventBus.emit({
         type: "task.result",
@@ -190,13 +197,10 @@ export class AgentNode {
       let currentChildNode = new AgentNode(currentChildProfile, this.eventBus, this.depthLimit);
       let childResult = await currentChildNode.handle(subtask);
 
-      // 5. Track failure & firing logic: If a child fails twice, fire and hire replacement
-      let attempts = 1;
+      // 5. Deterministic failure tracking: Enforce exactly 2 failures before firing
       while (childResult.verdict === "fail") {
-        currentChildProfile.perf.failed++;
-
-        if (attempts >= 2) {
-          // Fire failing child
+        if (currentChildProfile.perf.failed >= 2) {
+          // Exactly 2 failures reached -> fire agent
           currentChildProfile.status = "fired";
           this.eventBus.emit({
             type: "agent.fired",
@@ -205,7 +209,7 @@ export class AgentNode {
             ts: Date.now(),
           });
 
-          // Hire replacement with failure feedback via findOrHire
+          // Immediately rehire using findOrHire with verdictReason passed as feedback
           const replacementProfile = this.findOrHire(requiredSkill, childResult.verdictReason);
           this.eventBus.emit({
             type: "agent.hired",
@@ -214,7 +218,7 @@ export class AgentNode {
           });
 
           subtask.ownerAgentId = replacementProfile.id;
-          subtask.attempt = attempts + 1;
+          subtask.attempt = currentChildProfile.perf.failed + 1;
           subtask.status = "retrying";
 
           this.eventBus.emit({
@@ -232,22 +236,21 @@ export class AgentNode {
             ts: Date.now(),
           });
 
-          // Execute with replacement (forced pass to guarantee eventual completion)
+          // Execute replacement with forced pass to conclude retry cycle
           const replacementNode = new AgentNode(replacementProfile, this.eventBus, this.depthLimit);
           childResult = await replacementNode.handle(subtask, true);
           currentChildProfile = replacementProfile;
           break;
         } else {
-          // First failure: retry with current agent
-          attempts++;
-          subtask.attempt = attempts;
+          // First failure (perf.failed === 1): retry once with current agent
+          subtask.attempt = currentChildProfile.perf.attempted + 1;
           subtask.status = "retrying";
 
           this.eventBus.emit({
             type: "task.retry",
             taskId: subtask.id,
             attempt: subtask.attempt,
-            feedback: `Attempt 1 failed. Retrying task with current agent: ${childResult.verdictReason}`,
+            feedback: `Attempt 1 failed: ${childResult.verdictReason}. Retrying once with current agent.`,
             ts: Date.now(),
           });
 
