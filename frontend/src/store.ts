@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { io } from "socket.io-client";
+import { useMemo } from "react";
 
 export interface AgentPerf {
   attempted: number;
@@ -39,6 +40,10 @@ export interface Task {
   result?: TaskResult;
 }
 
+export interface TaskTreeNode extends Task {
+  children: TaskTreeNode[];
+}
+
 export type OrgEvent =
   | { type: "job.started"; jobId: string; brief: string; ts: number }
   | { type: "agent.hired"; agent: Agent; ts: number }
@@ -76,7 +81,6 @@ export const useOrgStore = create<OrgStore>((set) => ({
 
   addAgent: (agent) =>
     set((state) => ({
-      // Avoid duplicate hires if already in store
       agents: [...state.agents.filter((a) => a.id !== agent.id), agent],
     })),
 
@@ -104,6 +108,41 @@ export const useOrgStore = create<OrgStore>((set) => ({
       jobId: null,
     }),
 }));
+
+/**
+ * Transforms a flat array of tasks into a nested tree structure.
+ */
+export function buildTaskTree(tasks: Task[]): TaskTreeNode[] {
+  const map = new Map<string, TaskTreeNode>();
+
+  for (const t of tasks) {
+    map.set(t.id, { ...t, children: [] });
+  }
+
+  const roots: TaskTreeNode[] = [];
+
+  for (const t of tasks) {
+    const node = map.get(t.id)!;
+    if (t.parentTaskId && map.has(t.parentTaskId)) {
+      const parent = map.get(t.parentTaskId)!;
+      if (!parent.children.some((c) => c.id === node.id)) {
+        parent.children.push(node);
+      }
+    } else {
+      roots.push(node);
+    }
+  }
+
+  return roots;
+}
+
+/**
+ * React hook returning the hierarchical task tree directly from the store.
+ */
+export function useTaskTree(): TaskTreeNode[] {
+  const tasks = useOrgStore((state) => state.tasks);
+  return useMemo(() => buildTaskTree(tasks), [tasks]);
+}
 
 // Initialize Socket.IO connection to orchestrator server
 export const socket = io("http://localhost:3000", {
@@ -147,6 +186,13 @@ socket.on("orgEvent", (event: OrgEvent) => {
 
     case "task.created":
       store.addTask(event.task);
+      break;
+
+    case "task.decomposed":
+      store.updateTask(event.taskId, {
+        status: "decomposed",
+        subtaskIds: event.subtaskIds,
+      });
       break;
 
     case "task.assigned":
