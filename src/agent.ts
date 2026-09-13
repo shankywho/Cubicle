@@ -1,61 +1,39 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { EventBus } from "./eventBus.js";
 import { mockDecompose, mockExecute, mockSelfCritique } from "./mockLlm.js";
-import type { Agent, OrgEvent, Task, TaskResult } from "./types.js";
+import type { Agent, SkillTemplate, Task, TaskResult } from "./types.js";
 
 let deskCounter = 1;
 let agentCounter = 1;
 
 /**
- * Determine the most suitable skill role for a subtask based on description and depth.
+ * Determine the required skill key for a subtask based on task depth and description.
  */
-function resolveSkillForSubtask(task: Task): { skill: string; name: string; isManager: boolean } {
+export function determineSkillForTask(task: Task): string {
   const desc = task.description.toLowerCase();
 
   if (task.depth === 1) {
     if (desc.includes("research") || desc.includes("intelligence")) {
-      return {
-        skill: "manager-research",
-        name: `Research Lead #${agentCounter++}`,
-        isManager: true,
-      };
+      return "manager-research";
     }
-    return {
-      skill: "manager-synthesis",
-      name: `Synthesis Lead #${agentCounter++}`,
-      isManager: true,
-    };
+    return "manager-synthesis";
   }
 
-  // Depth >= 2: Leaf workers
+  // Depth >= 2: Leaf worker roles
   if (desc.includes("matrix") || desc.includes("pricing") || desc.includes("comparison") || desc.includes("metric")) {
-    return {
-      skill: "data-analysis",
-      name: `Data Analyst #${agentCounter++}`,
-      isManager: false,
-    };
+    return "data-analysis";
   }
 
   if (desc.includes("draft") || desc.includes("memo") || desc.includes("recommendation")) {
-    return {
-      skill: "writing",
-      name: `Senior Writer #${agentCounter++}`,
-      isManager: false,
-    };
+    return "writing";
   }
 
   if (desc.includes("critique") || desc.includes("review")) {
-    return {
-      skill: "critique",
-      name: `Rubric Critic #${agentCounter++}`,
-      isManager: false,
-    };
+    return "critique";
   }
 
-  return {
-    skill: "web-research",
-    name: `Research Analyst #${agentCounter++}`,
-    isManager: false,
-  };
+  return "web-research";
 }
 
 export class AgentNode {
@@ -70,24 +48,45 @@ export class AgentNode {
   }
 
   /**
-   * Helper to hire a child agent for a specific subtask.
+   * Find template in registry.json and instantiate agent.
+   * If feedback is provided, inject corrective directive into the system prompt.
    */
-  private hireChild(parent: Agent, subtask: Task, isReplacement: boolean = false, failureFeedback?: string): Agent {
-    const roleInfo = resolveSkillForSubtask(subtask);
-    const id = `agent-${roleInfo.skill}-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+  public findOrHire(requiredSkill: string, feedback?: string): Agent {
+    const registryPath = path.resolve(process.cwd(), "src/skills/registry.json");
+    const templates: SkillTemplate[] = JSON.parse(fs.readFileSync(registryPath, "utf-8"));
+    const template = templates.find((t) => t.key === requiredSkill);
+
+    if (!template) {
+      throw new Error(`Skill template not found in registry for key: "${requiredSkill}"`);
+    }
+
+    const id = `agent-${template.key}-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
     const deskId = `desk-${deskCounter++}`;
+    const isRehire = Boolean(feedback);
 
-    const prompt = isReplacement
-      ? `Replacement agent for skill [${roleInfo.skill}]. Note previous failure: "${failureFeedback || "Quality standards unmet"}". Adhere strictly to verified benchmarks.`
-      : `Specialized agent executing skill [${roleInfo.skill}] with high rigor and precision.`;
+    let systemPrompt = template.promptFragment;
+    if (feedback) {
+      systemPrompt += `\n\nIMPORTANT CORRECTIVE DIRECTIVE: ${feedback}`;
+    }
 
-    const child: Agent = {
+    const nameMap: Record<string, string> = {
+      "manager-research": "Research Lead",
+      "manager-synthesis": "Synthesis Lead",
+      "web-research": "Research Analyst",
+      "data-analysis": "Data Analyst",
+      "writing": "Senior Writer",
+      "critique": "Rubric Critic",
+    };
+    const roleBaseName = nameMap[template.key] || template.key;
+    const name = isRehire ? `Replacement ${roleBaseName} #${agentCounter++}` : `${roleBaseName} #${agentCounter++}`;
+
+    const agent: Agent = {
       id,
-      parentAgentId: parent.id,
-      name: isReplacement ? `Replacement ${roleInfo.name}` : roleInfo.name,
-      skill: roleInfo.skill,
-      systemPrompt: prompt,
-      tools: roleInfo.isManager ? ["delegate", "hire"] : ["web_search", "code_execution"],
+      parentAgentId: this.profile.id,
+      name,
+      skill: template.key,
+      systemPrompt,
+      tools: [...template.defaultTools],
       status: "idle",
       deskId,
       perf: {
@@ -97,7 +96,7 @@ export class AgentNode {
       },
     };
 
-    return child;
+    return agent;
   }
 
   /**
@@ -171,7 +170,8 @@ export class AgentNode {
 
     // 4. For each subtask: Hire, assign, and recursively execute
     for (const subtask of subtasks) {
-      let currentChildProfile = this.hireChild(this.profile, subtask);
+      const requiredSkill = determineSkillForTask(subtask);
+      let currentChildProfile = this.findOrHire(requiredSkill);
       this.eventBus.emit({
         type: "agent.hired",
         agent: currentChildProfile,
@@ -205,8 +205,8 @@ export class AgentNode {
             ts: Date.now(),
           });
 
-          // Hire replacement with failure feedback
-          const replacementProfile = this.hireChild(this.profile, subtask, true, childResult.verdictReason);
+          // Hire replacement with failure feedback via findOrHire
+          const replacementProfile = this.findOrHire(requiredSkill, childResult.verdictReason);
           this.eventBus.emit({
             type: "agent.hired",
             agent: replacementProfile,
