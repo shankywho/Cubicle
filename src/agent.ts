@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { EventBus } from "./eventBus.js";
-import { mockDecompose, mockExecute, mockSelfCritique } from "./mockLlm.js";
+import { critiqueTask, decomposeTask, executeTask } from "./llm.js";
 import type { Agent, SkillTemplate, Task, TaskResult } from "./types.js";
 
 let deskCounter = 1;
@@ -14,22 +14,48 @@ export function determineSkillForTask(task: Task): string {
   const desc = task.description.toLowerCase();
 
   if (task.depth === 1) {
-    if (desc.includes("research") || desc.includes("intelligence")) {
+    if (
+      desc.includes("research") ||
+      desc.includes("intelligence") ||
+      desc.includes("investigat") ||
+      desc.includes("competitor")
+    ) {
       return "manager-research";
     }
     return "manager-synthesis";
   }
 
   // Depth >= 2: Leaf worker roles
-  if (desc.includes("matrix") || desc.includes("pricing") || desc.includes("comparison") || desc.includes("metric")) {
+  if (
+    desc.includes("matrix") ||
+    desc.includes("pricing") ||
+    desc.includes("comparison") ||
+    desc.includes("metric") ||
+    desc.includes("benchmark") ||
+    desc.includes("data") ||
+    desc.includes("table")
+  ) {
     return "data-analysis";
   }
 
-  if (desc.includes("draft") || desc.includes("memo") || desc.includes("recommendation")) {
+  if (
+    desc.includes("draft") ||
+    desc.includes("memo") ||
+    desc.includes("recommendation") ||
+    desc.includes("author") ||
+    desc.includes("write") ||
+    desc.includes("summary")
+  ) {
     return "writing";
   }
 
-  if (desc.includes("critique") || desc.includes("review")) {
+  if (
+    desc.includes("critique") ||
+    desc.includes("review") ||
+    desc.includes("audit") ||
+    desc.includes("evaluat") ||
+    desc.includes("rubric")
+  ) {
     return "critique";
   }
 
@@ -67,7 +93,7 @@ export class AgentNode {
 
     let systemPrompt = template.promptFragment;
     if (feedback) {
-      systemPrompt += `\n\nIMPORTANT CORRECTIVE DIRECTIVE: Avoid previous failure mode: ${feedback}. Adhere strictly to verified benchmarks.`;
+      systemPrompt += `\n\nIMPORTANT CORRECTIVE DIRECTIVE: Avoid previous failure mode: ${feedback}. Adhere strictly to verified benchmarks and rigorous evidence.`;
     }
 
     const nameMap: Record<string, string> = {
@@ -101,7 +127,7 @@ export class AgentNode {
   }
 
   /**
-   * Universal recursive task processing loop.
+   * Universal recursive task processing loop wired to real Claude API.
    */
   public async handle(task: Task, forcePass: boolean = false): Promise<TaskResult> {
     // 1. Mark task started and emit event
@@ -115,13 +141,14 @@ export class AgentNode {
 
     const isLeaf = task.depth >= this.depthLimit;
 
-    // 2. Leaf Agent execution
+    // 2. Leaf Agent execution with real Claude API
     if (isLeaf) {
       this.profile.perf.attempted++;
-      const execResult = await mockExecute(this.profile, task);
+      const execResult = await executeTask(this.profile.systemPrompt, task.description);
+
       const critique = forcePass
         ? { verdict: "pass" as const, reason: "Verified and approved by quality verifier on retry." }
-        : await mockSelfCritique(this.profile, task, execResult);
+        : await critiqueTask(task.description, execResult.summary);
 
       execResult.verdict = critique.verdict;
       execResult.verdictReason = critique.reason;
@@ -151,8 +178,19 @@ export class AgentNode {
       return execResult;
     }
 
-    // 3. Manager Agent: Task decomposition & delegation
-    const subtasks = await mockDecompose(task);
+    // 3. Manager Agent: Task decomposition using Claude
+    const subtaskDescriptions = await decomposeTask(task.description);
+    const subtasks: Task[] = subtaskDescriptions.map((desc, idx) => ({
+      id: `task-${task.id}-sub${idx + 1}`,
+      parentTaskId: task.id,
+      ownerAgentId: null,
+      description: desc,
+      status: "pending",
+      depth: task.depth + 1,
+      subtaskIds: [],
+      attempt: 1,
+    }));
+
     task.status = "decomposed";
     task.subtaskIds = subtasks.map((s) => s.id);
 
@@ -197,10 +235,10 @@ export class AgentNode {
       let currentChildNode = new AgentNode(currentChildProfile, this.eventBus, this.depthLimit);
       let childResult = await currentChildNode.handle(subtask);
 
-      // 5. Deterministic failure tracking: Enforce exactly 2 failures before firing
+      // 5. Enforce 2 failures before firing based on Claude's real critique verdict
       while (childResult.verdict === "fail") {
         if (currentChildProfile.perf.failed >= 2) {
-          // Exactly 2 failures reached -> fire agent
+          // Exactly 2 failures reached -> fire failing agent
           currentChildProfile.status = "fired";
           this.eventBus.emit({
             type: "agent.fired",
@@ -209,7 +247,7 @@ export class AgentNode {
             ts: Date.now(),
           });
 
-          // Immediately rehire using findOrHire with verdictReason passed as feedback
+          // Immediately rehire replacement using findOrHire with failure feedback injected
           const replacementProfile = this.findOrHire(requiredSkill, childResult.verdictReason);
           this.eventBus.emit({
             type: "agent.hired",
@@ -225,7 +263,7 @@ export class AgentNode {
             type: "task.retry",
             taskId: subtask.id,
             attempt: subtask.attempt,
-            feedback: `Replacement hired. Corrective directive: ${childResult.verdictReason}`,
+            feedback: `Replacement hired with directive: ${childResult.verdictReason}`,
             ts: Date.now(),
           });
 
@@ -261,13 +299,16 @@ export class AgentNode {
       subtaskResults.push(childResult);
     }
 
-    // 6. Synthesize combined results and report upward
+    // 6. Synthesize combined deliverables using Claude
     const combinedConfidence = +(
       subtaskResults.reduce((acc, r) => acc + r.confidence, 0) / subtaskResults.length
     ).toFixed(2);
 
+    const synthesisPrompt = `Synthesize the following ${subtaskResults.length} subtask deliverables into an executive summary report for task: "${task.description}":\n\n${subtaskResults.map((r, i) => `Deliverable ${i + 1}:\n${r.summary}`).join("\n\n")}`;
+    const synthesisResult = await executeTask(this.profile.systemPrompt, synthesisPrompt);
+
     const finalResult: TaskResult = {
-      summary: `Synthesized report for "${task.description}" aggregating ${subtaskResults.length} subtask deliverables.`,
+      summary: synthesisResult.summary,
       confidence: combinedConfidence,
       verdict: "pass",
       artifacts: [
