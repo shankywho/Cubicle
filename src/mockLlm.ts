@@ -127,8 +127,10 @@ export async function mockSelfCritique(
 ): Promise<{ verdict: "pass" | "fail"; reason: string }> {
   await new Promise((resolve) => setTimeout(resolve, 40));
 
-  // 30% failure rate
-  const failed = Math.random() < 0.3;
+  // In the demo scenario, initial writer drafts intentionally fail rubric checks twice
+  // to exercise and visibly showcase the fire-and-rehire mechanism.
+  const isInitialWriter = agent.skill === "writing" && !agent.name.includes("Replacement") && task.attempt <= 2;
+  const failed = isInitialWriter || Math.random() < 0.3;
 
   if (failed) {
     return {
