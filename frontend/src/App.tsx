@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Office from "./Office";
+import TaskTreePanel from "./TaskTreePanel";
 import { useOrgStore } from "./store";
 
 export function App() {
@@ -44,13 +45,16 @@ export function App() {
       {/* 1. Full-screen 3D Office Scene */}
       <Office />
 
+      {/* 2. Live Task Hierarchy Side Panel */}
+      <TaskTreePanel />
+
       {/* Top Header Overlay */}
       <header
         style={{
           position: "absolute",
           top: 16,
           left: 16,
-          right: 16,
+          right: 366,
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
