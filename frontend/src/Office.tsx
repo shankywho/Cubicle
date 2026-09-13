@@ -2,6 +2,7 @@ import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Text } from "@react-three/drei";
 import { useOrgStore } from "./store";
 import { AgentAvatar } from "./AgentAvatar";
+import { CameraController } from "./CameraController";
 
 // Defined 3D positions for the 8 workstations + CEO desk
 export const DESK_CONFIG: Record<string, [number, number, number]> = {
@@ -66,6 +67,9 @@ export function Office() {
         enableDamping
         dampingFactor={0.05}
       />
+
+      {/* Scripted cinematic camera moves for workflow milestones */}
+      <CameraController />
 
       {/* 1. Ambient & Directional Lighting */}
       <ambientLight intensity={0.7} />
