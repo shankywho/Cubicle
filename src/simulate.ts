@@ -1,4 +1,5 @@
-import "dotenv/config";
+import { config } from "dotenv";
+config();
 import fs from "node:fs";
 import path from "node:path";
 import { AgentNode } from "./agent.js";
