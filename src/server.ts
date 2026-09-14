@@ -2,6 +2,7 @@ import "dotenv/config";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import readline from "node:readline";
 import express from "express";
 import cors from "cors";
 import { Server } from "socket.io";
@@ -125,6 +126,67 @@ app.post("/jobs", (req, res) => {
     status: "started",
     jobId,
   });
+});
+
+/**
+ * POST /replay
+ * Streams pre-recorded runs/run-001.jsonl line-by-line over Socket.IO at 2x speed.
+ */
+app.post("/replay", (_req, res) => {
+  const filePath = path.resolve(process.cwd(), "runs/run-001.jsonl");
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: "No recorded run found at runs/run-001.jsonl" });
+  }
+
+  // 6. Return { status: "replaying" } immediately to the client before the loop starts
+  res.status(202).json({ status: "replaying" });
+
+  // Stream events line-by-line in background
+  (async () => {
+    console.log(`\n🎞️ [Replay] Streaming saved run from ${filePath} over Socket.IO...`);
+    try {
+      const fileStream = fs.createReadStream(filePath, { encoding: "utf-8" });
+      const rl = readline.createInterface({
+        input: fileStream,
+        crlfDelay: Infinity,
+      });
+
+      let previousTs = 0;
+
+      for await (const line of rl) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        try {
+          const event: OrgEvent = JSON.parse(trimmed);
+
+          // Calculate time difference from previous event's ts (default to 0 for first event)
+          let delay = 0;
+          if (previousTs > 0 && event.ts && event.ts >= previousTs) {
+            // Play back at 2x speed (multiply delay by 0.5)
+            delay = (event.ts - previousTs) * 0.5;
+            // Cap maximum delay at 3.5s to prevent long pauses during presentation
+            delay = Math.min(delay, 3500);
+          }
+          previousTs = event.ts || previousTs;
+
+          if (delay > 0) {
+            await new Promise((resolve) => setTimeout(resolve, delay));
+          }
+
+          // Emit event to connected clients
+          io.emit("orgEvent", event);
+        } catch (parseErr) {
+          console.error("Failed to parse replay event line:", parseErr);
+        }
+      }
+
+      console.log(`🎬 [Replay] Completed streaming run-001.jsonl.`);
+    } catch (err) {
+      console.error(`❌ [Replay] Error reading run file:`, err);
+    }
+  })();
 });
 
 server.listen(PORT, () => {
