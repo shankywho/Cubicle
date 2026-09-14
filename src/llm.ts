@@ -94,9 +94,11 @@ export function safeParseJson<T>(raw: string): T {
 
 /**
  * Sends a system prompt instructing the model to break the task into 2-3 subtasks.
- * Uses response_format: { type: "json_object" } and mandates output structure { "subtasks": ["step 1", "step 2"] }.
+ * Enforces output structure { "rationale": "one sentence explaining why", "subtasks": ["step 1", "step 2"] }.
  */
-export async function decomposeTask(taskDescription: string): Promise<string[]> {
+export async function decomposeTask(
+  taskDescription: string
+): Promise<string[] & { rationale: string; subtasks: string[] }> {
   return withRateLimitRetry(async () => {
     const client = getGroqClient();
     const completion = await client.chat.completions.create({
@@ -107,7 +109,7 @@ export async function decomposeTask(taskDescription: string): Promise<string[]> 
         {
           role: "system",
           content:
-            'You are an expert organizational task decomposition engine. Break the given task into 2 to 3 distinct, self-contained, and actionable subtasks. IMPORTANT: Every subtask MUST preserve the target subjects (e.g. Cursor, Windsurf, GitHub Copilot Workspace). You must respond with a JSON object matching this schema: { "subtasks": ["step 1", "step 2"] }.',
+            'You are an expert organizational task decomposition engine. Break the given task into 2 to 3 distinct, self-contained, and actionable subtasks. IMPORTANT: Every subtask MUST preserve the target subjects (e.g. Cursor, Windsurf, GitHub Copilot Workspace). You must respond with a JSON object matching this schema: { "rationale": "one sentence explaining why", "subtasks": ["step 1", "step 2"] }.',
         },
         {
           role: "user",
@@ -118,13 +120,22 @@ export async function decomposeTask(taskDescription: string): Promise<string[]> 
     });
 
     const content = completion.choices[0]?.message?.content || "{}";
-    const parsed = safeParseJson<{ subtasks?: string[] }>(content);
+    const parsed = safeParseJson<{ rationale?: string; subtasks?: string[] }>(content);
 
     if (!parsed.subtasks || !Array.isArray(parsed.subtasks) || parsed.subtasks.length === 0) {
       throw new Error(`Invalid decomposition response from Groq: ${content}`);
     }
 
-    return parsed.subtasks;
+    const rationale =
+      parsed.rationale ||
+      `Decomposed into ${parsed.subtasks.length} specialized subtasks to address technical objectives.`;
+
+    const result = Object.assign([...parsed.subtasks], {
+      rationale,
+      subtasks: parsed.subtasks,
+    });
+
+    return result;
   });
 }
 
@@ -195,6 +206,9 @@ export async function executeTask(
 
     const collectedToolOutputs: string[] = [];
     let finalSummary = "";
+    let promptTokens = 0;
+    let completionTokens = 0;
+    let totalTokens = 0;
 
     for (let turn = 0; turn < maxTurns; turn++) {
       const isForcedExitTurn = turn === maxTurns - 1;
@@ -214,6 +228,14 @@ export async function executeTask(
           temperature: 0.3,
         });
 
+        if (completion.usage) {
+          promptTokens += completion.usage.prompt_tokens || 0;
+          completionTokens += completion.usage.completion_tokens || 0;
+          totalTokens +=
+            completion.usage.total_tokens ||
+            (completion.usage.prompt_tokens || 0) + (completion.usage.completion_tokens || 0);
+        }
+
         finalSummary = completion.choices[0]?.message?.content || "";
         break;
       }
@@ -227,6 +249,14 @@ export async function executeTask(
         tool_choice: "auto",
         temperature: 0.2,
       });
+
+      if (completion.usage) {
+        promptTokens += completion.usage.prompt_tokens || 0;
+        completionTokens += completion.usage.completion_tokens || 0;
+        totalTokens +=
+          completion.usage.total_tokens ||
+          (completion.usage.prompt_tokens || 0) + (completion.usage.completion_tokens || 0);
+      }
 
       const message = completion.choices[0]?.message;
       if (!message) break;
@@ -298,6 +328,11 @@ export async function executeTask(
       confidence,
       artifacts,
       toolSummary: collectedToolOutputs.join("\n\n"),
+      tokens: {
+        prompt: promptTokens,
+        completion: completionTokens,
+        total: totalTokens || promptTokens + completionTokens,
+      },
     };
   });
 }
@@ -311,7 +346,11 @@ export async function critiqueTask(
   taskDescription: string,
   resultSummary: string,
   toolSummary?: string
-): Promise<{ verdict: "pass" | "fail"; reason: string }> {
+): Promise<{
+  verdict: "pass" | "fail";
+  reason: string;
+  tokens?: { prompt: number; completion: number; total: number };
+}> {
   return withRateLimitRetry(async () => {
     const client = getGroqClient();
     const messages: any[] = [
@@ -342,7 +381,50 @@ export async function critiqueTask(
     const verdict = parsed.verdict?.toLowerCase() === "fail" ? "fail" : "pass";
     const reason = parsed.reason || "Evaluated by verifier.";
 
-    return { verdict, reason };
+    const tokens = completion.usage
+      ? {
+          prompt: completion.usage.prompt_tokens || 0,
+          completion: completion.usage.completion_tokens || 0,
+          total:
+            completion.usage.total_tokens ||
+            (completion.usage.prompt_tokens || 0) + (completion.usage.completion_tokens || 0),
+        }
+      : undefined;
+
+    return { verdict, reason, tokens };
+  });
+}
+
+/**
+ * Asks the LLM to write a 1-sentence reflection on why it failed, returning just the string.
+ */
+export async function reflectOnFailure(
+  taskDescription: string,
+  resultSummary: string,
+  critiqueReason: string
+): Promise<string> {
+  return withRateLimitRetry(async () => {
+    const client = getGroqClient();
+    const completion = await client.chat.completions.create({
+      model: MODEL,
+      max_tokens: 150,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are an autonomous AI agent performing self-reflection after a task quality failure. In exactly ONE concise sentence, explain why your execution failed and the specific correction needed for the retry. Output only that single sentence.",
+        },
+        {
+          role: "user",
+          content: `Task Description: "${taskDescription}"\nYour Prior Output: "${resultSummary}"\nAuditor Critique: "${critiqueReason}"\n\nState your 1-sentence self-reflection and correction:`,
+        },
+      ],
+      temperature: 0.2,
+    });
+
+    const raw = completion.choices[0]?.message?.content || "";
+    const cleaned = raw.replace(/<[^>]+>/g, "").replace(/^["'`]|["'`]$/g, "").trim();
+    return cleaned || `Self-correction needed: address critique regarding "${critiqueReason}".`;
   });
 }
 

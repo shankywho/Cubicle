@@ -18,6 +18,8 @@ export interface TaskResult {
   confidence: number; // 0–1, self-reported by the agent
   verdict?: "pass" | "fail"; // set by a critic/verifier step
   verdictReason?: string;
+  toolSummary?: string;
+  tokens?: { prompt: number; completion: number; total: number };
 }
 
 export interface Task {
@@ -64,7 +66,7 @@ export type OrgEvent =
   | { type: "agent.hired"; agent: Agent; ts: number }
   | { type: "agent.fired"; agentId: string; reason: string; ts: number }
   | { type: "task.created"; task: Task; ts: number }
-  | { type: "task.decomposed"; taskId: string; subtaskIds: string[]; ts: number }
+  | { type: "task.decomposed"; taskId: string; subtaskIds: string[]; rationale?: string; ts: number }
   | { type: "task.assigned"; taskId: string; agentId: string; ts: number }
   | { type: "task.started"; taskId: string; ts: number }
   | { type: "task.result"; taskId: string; result: TaskResult; ts: number }
