@@ -76,6 +76,9 @@ async function runTests() {
       pass: false,
       evidence: `Failed with error: ${err.message}`,
     };
+  } finally {
+    const testBusPath = path.resolve(process.cwd(), "tests/check1.jsonl");
+    if (fs.existsSync(testBusPath)) fs.unlinkSync(testBusPath);
   }
 
   // -------------------------------------------------------------
@@ -108,7 +111,8 @@ async function runTests() {
   // -------------------------------------------------------------
   console.log("--- Executing Check 3: On-the-fly Skill Synthesis ---");
   try {
-    const testBus = new EventBus(path.resolve(process.cwd(), "tests/check3.jsonl"));
+    const testBusPath = path.resolve(process.cwd(), "tests/check3.jsonl");
+    const testBus = new EventBus(testBusPath);
     const ceoAgent: Agent = {
       id: "agent-ceo-test3",
       parentAgentId: null,
@@ -148,6 +152,9 @@ async function runTests() {
       pass: false,
       evidence: `Failed with error: ${err.message}`,
     };
+  } finally {
+    const testBusPath = path.resolve(process.cwd(), "tests/check3.jsonl");
+    if (fs.existsSync(testBusPath)) fs.unlinkSync(testBusPath);
   }
 
   // -------------------------------------------------------------
@@ -267,6 +274,9 @@ async function runTests() {
       pass: false,
       evidence: `Failed with error: ${err.message}`,
     };
+  } finally {
+    const testBusPath = path.resolve(process.cwd(), "tests/check5.jsonl");
+    if (fs.existsSync(testBusPath)) fs.unlinkSync(testBusPath);
   }
 
   // -------------------------------------------------------------

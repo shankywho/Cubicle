@@ -23,13 +23,17 @@ function getGroqClient(): Groq {
 /**
  * Execute a function with automatic retry on 429 rate limit backoff.
  */
-async function withRateLimitRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+async function withRateLimitRetry<T>(fn: () => Promise<T>, maxRetries = 5): Promise<T> {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       return await fn();
     } catch (err: any) {
       if (err?.status === 429 && attempt < maxRetries - 1) {
-        const waitMs = 3000 * (attempt + 1);
+        let waitMs = 4000 * (attempt + 1);
+        const match = err?.message?.match(/try again in ([\d\.]+)s/);
+        if (match && match[1]) {
+          waitMs = Math.ceil(parseFloat(match[1]) * 1000) + 1500;
+        }
         console.log(`⏳ [Groq Rate Limit] Waiting ${waitMs / 1000}s for token replenishment...`);
         await new Promise((resolve) => setTimeout(resolve, waitMs));
       } else {
