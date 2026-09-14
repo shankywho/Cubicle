@@ -1,11 +1,26 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { EventBus } from "./eventBus.js";
-import { critiqueTask, decomposeTask, executeTask } from "./llm.js";
+import { critiqueTask, decomposeTask, executeTask, synthesizeSkillTemplate } from "./llm.js";
 import type { Agent, SkillTemplate, Task, TaskResult } from "./types.js";
 
 let deskCounter = 1;
 let agentCounter = 1;
+
+/**
+ * Global pool tracking all hired agents in the organization for reuse.
+ */
+export const organizationPool: AgentNode[] = [];
+
+let localRegistryCache: SkillTemplate[] | null = null;
+
+function getSkillRegistry(): SkillTemplate[] {
+  if (!localRegistryCache) {
+    const registryPath = path.resolve(process.cwd(), "src/skills/registry.json");
+    localRegistryCache = JSON.parse(fs.readFileSync(registryPath, "utf-8"));
+  }
+  return localRegistryCache!;
+}
 
 /**
  * Determine the required skill key for a subtask based on task depth and description.
@@ -74,16 +89,33 @@ export class AgentNode {
   }
 
   /**
-   * Finds or instantiates an agent for the specified skill directly from registry.json.
+   * Finds an existing idle agent from the organization pool, or hires a new one from registry.json.
+   * If the skill is unregistered, dynamically synthesizes the SkillTemplate on the fly using Groq.
    * If feedback is provided (rehire after firing), dynamically injects the corrective feedback.
    */
-  public findOrHire(requiredSkill: string, feedback?: string): Agent {
-    const registryPath = path.resolve(process.cwd(), "src/skills/registry.json");
-    const templates: SkillTemplate[] = JSON.parse(fs.readFileSync(registryPath, "utf-8"));
-    const template = templates.find((t) => t.key === requiredSkill);
+  public async findOrHire(
+    requiredSkill: string,
+    taskDesc: string,
+    feedback?: string
+  ): Promise<AgentNode> {
+    // 1. Scan organizationPool for an agent where agent.skill === requiredSkill and agent.status === "idle"
+    if (!feedback) {
+      const idleNode = organizationPool.find(
+        (node) => node.profile.skill === requiredSkill && node.profile.status === "idle"
+      );
+      if (idleNode) {
+        idleNode.profile.status = "working";
+        return idleNode;
+      }
+    }
+
+    // 2. Check registry; if missing, synthesize on-the-fly via Groq
+    const templates = getSkillRegistry();
+    let template = templates.find((t) => t.key === requiredSkill);
 
     if (!template) {
-      throw new Error(`Skill template not found in registry for key: "${requiredSkill}"`);
+      template = await synthesizeSkillTemplate(requiredSkill, taskDesc);
+      templates.push(template);
     }
 
     const agentIndex = agentCounter++;
@@ -114,7 +146,7 @@ export class AgentNode {
       skill: template.key,
       systemPrompt,
       tools: [...template.defaultTools],
-      status: "idle",
+      status: "working",
       deskId,
       perf: {
         attempted: 0,
@@ -123,7 +155,16 @@ export class AgentNode {
       },
     };
 
-    return agent;
+    const newNode = new AgentNode(agent, this.eventBus, this.depthLimit);
+    organizationPool.push(newNode);
+
+    this.eventBus.emit({
+      type: "agent.hired",
+      agent,
+      ts: Date.now(),
+    });
+
+    return newNode;
   }
 
   /**
@@ -217,47 +258,40 @@ export class AgentNode {
     const subtaskResults: TaskResult[] = await Promise.all(
       subtasks.map(async (subtask) => {
         const requiredSkill = determineSkillForTask(subtask);
-        let currentChildProfile = this.findOrHire(requiredSkill);
-        this.eventBus.emit({
-          type: "agent.hired",
-          agent: currentChildProfile,
-          ts: Date.now(),
-        });
+        let currentChildNode = await this.findOrHire(requiredSkill, subtask.description);
 
-        subtask.ownerAgentId = currentChildProfile.id;
+        subtask.ownerAgentId = currentChildNode.profile.id;
         subtask.status = "assigned";
         this.eventBus.emit({
           type: "task.assigned",
           taskId: subtask.id,
-          agentId: currentChildProfile.id,
+          agentId: currentChildNode.profile.id,
           ts: Date.now(),
         });
 
-        let currentChildNode = new AgentNode(currentChildProfile, this.eventBus, this.depthLimit);
         let childResult = await currentChildNode.handle(subtask);
 
         // 5. Enforce 2 failures before firing based on Claude's real critique verdict
         while (childResult.verdict === "fail") {
-          if (currentChildProfile.perf.failed >= 2) {
+          if (currentChildNode.profile.perf.failed >= 2) {
             // Exactly 2 failures reached -> fire failing agent
-            currentChildProfile.status = "fired";
+            currentChildNode.profile.status = "fired";
             this.eventBus.emit({
               type: "agent.fired",
-              agentId: currentChildProfile.id,
+              agentId: currentChildNode.profile.id,
               reason: `Repeated quality failure on task "${subtask.id}": ${childResult.verdictReason}`,
               ts: Date.now(),
             });
 
             // Immediately rehire replacement using findOrHire with failure feedback injected
-            const replacementProfile = this.findOrHire(requiredSkill, childResult.verdictReason);
-            this.eventBus.emit({
-              type: "agent.hired",
-              agent: replacementProfile,
-              ts: Date.now(),
-            });
+            const replacementNode = await this.findOrHire(
+              requiredSkill,
+              subtask.description,
+              childResult.verdictReason
+            );
 
-            subtask.ownerAgentId = replacementProfile.id;
-            subtask.attempt = currentChildProfile.perf.failed + 1;
+            subtask.ownerAgentId = replacementNode.profile.id;
+            subtask.attempt = currentChildNode.profile.perf.failed + 1;
             subtask.status = "retrying";
 
             this.eventBus.emit({
@@ -271,18 +305,17 @@ export class AgentNode {
             this.eventBus.emit({
               type: "task.assigned",
               taskId: subtask.id,
-              agentId: replacementProfile.id,
+              agentId: replacementNode.profile.id,
               ts: Date.now(),
             });
 
             // Execute replacement with forced pass to conclude retry cycle
-            const replacementNode = new AgentNode(replacementProfile, this.eventBus, this.depthLimit);
             childResult = await replacementNode.handle(subtask, true);
-            currentChildProfile = replacementProfile;
+            currentChildNode = replacementNode;
             break;
           } else {
             // First failure (perf.failed === 1): retry once with current agent
-            subtask.attempt = currentChildProfile.perf.attempted + 1;
+            subtask.attempt = currentChildNode.profile.perf.attempted + 1;
             subtask.status = "retrying";
 
             this.eventBus.emit({

@@ -125,7 +125,10 @@ async function runTests() {
     let errorCaught = false;
     let errorMessage = "";
     try {
-      node.findOrHire("quantum-cryptography-specialist");
+      await node.findOrHire(
+        "quantum-cryptography-specialist",
+        "Implement post-quantum lattice cryptography"
+      );
     } catch (err: any) {
       errorCaught = true;
       errorMessage = err.message;
@@ -139,6 +142,7 @@ async function runTests() {
         : "PASS: Successfully synthesized new skill template.",
     };
     console.log(`Result Check 3: ${passed ? "PASS" : "FAIL"}\n`);
+    if (fs.existsSync(testBusPath)) fs.unlinkSync(testBusPath);
   } catch (err: any) {
     results["Check 3: Unregistered Skill Synthesis"] = {
       pass: false,
