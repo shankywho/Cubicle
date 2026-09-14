@@ -1,6 +1,6 @@
 import "dotenv/config";
 import Groq from "groq-sdk";
-import type { TaskResult } from "./types.js";
+import type { TaskResult, SkillTemplate } from "./types.js";
 
 // Active, high-performing model on Groq
 const MODEL = process.env.GROQ_MODEL || "qwen/qwen3.8-27b";
@@ -199,3 +199,48 @@ export async function critiqueTask(
     return { verdict, reason };
   });
 }
+
+/**
+ * Synthesizes a new SkillTemplate on the fly using Groq when an unregistered skill is requested.
+ */
+export async function synthesizeSkillTemplate(
+  skillKey: string,
+  taskDescription: string
+): Promise<SkillTemplate> {
+  return withRateLimitRetry(async () => {
+    const client = getGroqClient();
+    const completion = await client.chat.completions.create({
+      model: MODEL,
+      response_format: { type: "json_object" },
+      max_tokens: 300,
+      messages: [
+        {
+          role: "system",
+          content:
+            'You are an expert Autonomous Org HR Architect. Your role is to dynamically synthesize new agent skill specifications and system prompts when an autonomous organization requires an unregistered skill role. You must output a JSON object strictly matching this schema:\n{\n  "key": string,\n  "promptFragment": string,\n  "defaultTools": string[],\n  "isManager": boolean\n}',
+        },
+        {
+          role: "user",
+          content: `Synthesize a SkillTemplate for:\nRole / Skill Key: "${skillKey}"\nTarget Task: "${taskDescription}"\n\nEnsure "key" matches "${skillKey}". Provide a comprehensive "promptFragment" describing the role persona and instructions. "defaultTools" should include appropriate tools (e.g. ["search_web", "read_file", "execute_python", "delegate"]). Set "isManager" to true if the role manages other subagents or false if it is an individual contributor.`,
+        },
+      ],
+      temperature: 0.2,
+    });
+
+    const content = completion.choices[0]?.message?.content || "{}";
+    const parsed = safeParseJson<SkillTemplate>(content);
+
+    return {
+      key: parsed.key || skillKey,
+      promptFragment:
+        parsed.promptFragment ||
+        `You are a specialized agent for ${skillKey}. Complete all assigned tasks with rigorous attention to detail and factual accuracy.`,
+      defaultTools:
+        Array.isArray(parsed.defaultTools) && parsed.defaultTools.length > 0
+          ? parsed.defaultTools
+          : ["search_web", "read_file"],
+      isManager: Boolean(parsed.isManager),
+    };
+  });
+}
+
