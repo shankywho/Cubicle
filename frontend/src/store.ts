@@ -78,6 +78,7 @@ interface OrgStore {
   addTask: (task: Task) => void;
   updateTask: (taskId: string, patch: Partial<Task>) => void;
   addMessage: (msg: { fromAgentId: string; toAgentId?: string; content: string; ts?: number }) => void;
+  reset: () => void;
   clearState: () => void;
 }
 
@@ -123,6 +124,15 @@ export const useOrgStore = create<OrgStore>((set) => ({
         },
       ],
     })),
+
+  reset: () =>
+    set({
+      agents: [],
+      tasks: [],
+      messages: [],
+      jobStatus: "idle",
+      jobId: null,
+    }),
 
   clearState: () =>
     set({

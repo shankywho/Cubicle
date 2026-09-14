@@ -8,11 +8,13 @@ export function App() {
   const agents = useOrgStore((state) => state.agents);
   const jobStatus = useOrgStore((state) => state.jobStatus);
   const jobId = useOrgStore((state) => state.jobId);
+  const reset = useOrgStore((state) => state.reset);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleStartRun = async () => {
+    reset();
     setLoading(true);
     setError(null);
 
