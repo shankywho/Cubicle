@@ -182,16 +182,22 @@ export class AgentNode {
 
     const isLeaf = task.depth >= this.depthLimit;
 
-    // 2. Leaf Agent execution with real Groq API
+    // 2. Leaf Agent execution with real Groq API and real Tool Dispatcher
     if (isLeaf) {
       this.profile.perf.attempted++;
       await new Promise((resolve) => setTimeout(resolve, 600));
-      const execResult = await executeTask(this.profile.systemPrompt, task.description);
+      const execResult = await executeTask(
+        this.profile.systemPrompt,
+        task.description,
+        this.profile.tools,
+        this.profile.id,
+        this.eventBus
+      );
 
       await new Promise((resolve) => setTimeout(resolve, 600));
       const critique = forcePass
         ? { verdict: "pass" as const, reason: "Verified and approved by quality verifier on retry." }
-        : await critiqueTask(task.description, execResult.summary);
+        : await critiqueTask(task.description, execResult.summary, execResult.toolSummary);
 
       execResult.verdict = critique.verdict;
       execResult.verdictReason = critique.reason;

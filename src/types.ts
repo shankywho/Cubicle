@@ -70,4 +70,6 @@ export type OrgEvent =
   | { type: "task.result"; taskId: string; result: TaskResult; ts: number }
   | { type: "task.retry"; taskId: string; attempt: number; feedback: string; ts: number }
   | { type: "message"; fromAgentId: string; toAgentId: string; content: string; ts: number }
+  | { type: "tool.invoked"; agentId: string; toolName: string; args: Record<string, any>; ts: number }
+  | { type: "tool.result"; agentId: string; toolName: string; summary: string; ts: number }
   | { type: "job.completed"; jobId: string; finalResult: TaskResult; ts: number };

@@ -307,6 +307,18 @@ socket.on("orgEvent", (event: OrgEvent) => {
       });
       break;
 
+    case "tool.invoked": {
+      const targetAgent = store.agents.find((a) => a.id === event.agentId);
+      const agentName = targetAgent?.name || event.agentId;
+      console.log(`🔧 [TOOL INVOKED] ${agentName} -> ${event.toolName}`);
+      break;
+    }
+
+    case "tool.result": {
+      console.log(`✅ [TOOL RESULT] ${event.agentId} -> ${event.toolName}: ${event.summary.slice(0, 80)}`);
+      break;
+    }
+
     case "job.completed":
       useOrgStore.setState({ jobStatus: "completed" });
       break;

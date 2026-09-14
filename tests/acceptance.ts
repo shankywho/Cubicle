@@ -8,6 +8,8 @@ import { io as ClientIO } from "../frontend/node_modules/socket.io-client/build/
 import { AgentNode } from "../src/agent.js";
 import { EventBus } from "../src/eventBus.js";
 import { safeParseJson } from "../src/llm.js";
+import { safeReadFile, safeExecuteCode } from "../src/tools/security.js";
+import { dispatchTool } from "../src/tools/index.js";
 import type { Agent, OrgEvent, Task } from "../src/types.js";
 
 async function runTests() {
@@ -343,6 +345,53 @@ Extra commentary here.`;
       evidence: err.message,
     };
     console.log("Result Check 7: FAIL\n");
+  }
+
+  // -------------------------------------------------------------
+  // CHECK 8: Hardened Tool Dispatcher & Path Traversal Security
+  // -------------------------------------------------------------
+  console.log("--- Executing Check 8: Tool Dispatcher & Path Traversal Security ---");
+  try {
+    let traversalBlocked = false;
+    try {
+      safeReadFile("../../.env");
+    } catch (e: any) {
+      traversalBlocked = e.message.includes("path traversal");
+    }
+
+    let envBlocked = false;
+    try {
+      safeReadFile(".env");
+    } catch (e: any) {
+      envBlocked = e.message.includes("protected or sensitive file");
+    }
+
+    const testBusPath = path.resolve(process.cwd(), "tests/check8.jsonl");
+    const testBus = new EventBus(testBusPath);
+    testBus.clearLog();
+
+    let toolInvokedEmitted = false;
+    testBus.subscribe((ev) => {
+      if (ev.type === "tool.invoked") toolInvokedEmitted = true;
+    });
+
+    const toolRes = await dispatchTool("search_web", { query: "Cursor IDE" }, "agent-test", testBus);
+    if (fs.existsSync(testBusPath)) fs.unlinkSync(testBusPath);
+
+    const check8Passed = traversalBlocked && envBlocked && toolRes.success && toolInvokedEmitted;
+    results["Check 8: Hardened Tool Dispatcher & Path Traversal Security"] = {
+      pass: check8Passed,
+      evidence: check8Passed
+        ? "PASS: Path traversal and .env reading rejected; tool.invoked event emitted and search_web dispatched safely."
+        : "FAIL: Tool dispatcher security or event emission failed.",
+    };
+    console.log(`Result Check 8: ${check8Passed ? "PASS" : "FAIL"}\n`);
+  } catch (err: any) {
+    results["Check 8: Hardened Tool Dispatcher & Path Traversal Security"] = {
+      pass: false,
+      evidence: err.message,
+    };
+    console.log("Result Check 8: FAIL\n");
   }
 
   console.log("===============================================================");
