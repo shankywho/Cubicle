@@ -207,8 +207,8 @@ socket.on("connect_error", () => {
   useOrgStore.setState({ connected: false });
 });
 
-// Real-time listener for typed org events
-socket.on("orgEvent", (event: OrgEvent) => {
+// Unified event processor for both live socket events and client-side replays
+export function processOrgEvent(event: OrgEvent) {
   const store = useOrgStore.getState();
 
   // Keep event history
@@ -337,4 +337,9 @@ socket.on("orgEvent", (event: OrgEvent) => {
       useOrgStore.setState({ jobStatus: "completed" });
       break;
   }
+}
+
+// Real-time listener for typed org events
+socket.on("orgEvent", (event: OrgEvent) => {
+  processOrgEvent(event);
 });

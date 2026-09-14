@@ -61,6 +61,7 @@ export function Office() {
       style={{ width: "100%", height: "100%", background: "#090d16" }}
     >
       <OrbitControls
+        makeDefault
         maxPolarAngle={Math.PI / 2.1}
         minDistance={4}
         maxDistance={24}

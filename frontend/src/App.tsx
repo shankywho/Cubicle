@@ -1,7 +1,7 @@
 import { useState } from "react";
 import Office from "./Office";
 import TaskTreePanel from "./TaskTreePanel";
-import { useOrgStore } from "./store";
+import { useOrgStore, processOrgEvent } from "./store";
 
 export function App() {
   const connected = useOrgStore((state) => state.connected);
@@ -24,36 +24,75 @@ export function App() {
     const dummyBrief =
       "Research the competitive landscape for modern AI code editors (analyzing Cursor, Windsurf, and GitHub Copilot Workspace), evaluate their core strengths, weaknesses, and pricing, and produce a formal decision memo with a strategic recommendation for our engineering team.";
 
+    const url =
+      mode === "live"
+        ? "http://localhost:3000/jobs"
+        : "http://localhost:3000/replay";
+
+    const options: RequestInit =
+      mode === "live"
+        ? {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ brief: dummyBrief }),
+          }
+        : {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ runFile: selectedRun }),
+          };
+
     try {
-      const url =
-        mode === "live"
-          ? "http://localhost:3000/jobs"
-          : "http://localhost:3000/replay";
-
-      const options: RequestInit =
-        mode === "live"
-          ? {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ brief: dummyBrief }),
-            }
-          : {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ runFile: selectedRun }),
-            };
-
       const response = await fetch(url, options);
 
-      if (!response.ok) {
-        throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`${mode === "live" ? "Live job" : "Replay"} launched successfully:`, data);
+        return;
+      }
+      throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+    } catch (err: any) {
+      // If Replay mode and backend is unavailable, fallback gracefully to client-side replay from static files
+      if (mode === "replay") {
+        console.warn("Backend unavailable on port 3000, streaming replay directly on client:", err);
+        try {
+          const res = await fetch(`/runs/${selectedRun}`);
+          if (!res.ok) throw new Error(`Replay file not found: /runs/${selectedRun}`);
+          const text = await res.text();
+          const lines = text.split("\n").filter((l) => l.trim().length > 0);
+
+          useOrgStore.setState({ jobStatus: "running" });
+
+          (async () => {
+            let previousTs = 0;
+            for (const line of lines) {
+              try {
+                const event = JSON.parse(line.trim());
+                let delay = 0;
+                if (previousTs > 0 && event.ts && event.ts >= previousTs) {
+                  delay = Math.min((event.ts - previousTs) * 0.5, 2000);
+                }
+                previousTs = event.ts || previousTs;
+                if (delay > 0) {
+                  await new Promise((r) => setTimeout(r, delay));
+                }
+                processOrgEvent(event);
+              } catch (parseErr) {
+                console.error("Replay parse error:", parseErr);
+              }
+            }
+          })();
+          return;
+        } catch (clientErr: any) {
+          setError(`Failed to replay locally: ${clientErr.message}`);
+          return;
+        }
       }
 
-      const data = await response.json();
-      console.log(`${mode === "live" ? "Live job" : "Replay"} launched successfully:`, data);
-    } catch (err: any) {
       console.error(`Failed to start ${mode} run:`, err);
-      setError(err.message || "Failed to connect to backend server");
+      setError(
+        "Cannot connect to backend orchestrator on http://localhost:3000. Please ensure 'npm run serve' is running."
+      );
     } finally {
       setLoading(false);
     }
