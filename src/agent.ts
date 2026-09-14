@@ -197,13 +197,13 @@ export class AgentNode {
     task.subtaskIds = subtasks.map((s) => s.id);
 
     // Emit task.created for each subtask
-    for (const subtask of subtasks) {
+    subtasks.forEach((subtask) => {
       this.eventBus.emit({
         type: "task.created",
         task: subtask,
         ts: Date.now(),
       });
-    }
+    });
 
     // Emit decomposition event
     this.eventBus.emit({
@@ -213,93 +213,93 @@ export class AgentNode {
       ts: Date.now(),
     });
 
-    const subtaskResults: TaskResult[] = [];
+    // 4. For each subtask: Hire, assign, and recursively execute concurrently via Promise.all
+    const subtaskResults: TaskResult[] = await Promise.all(
+      subtasks.map(async (subtask) => {
+        const requiredSkill = determineSkillForTask(subtask);
+        let currentChildProfile = this.findOrHire(requiredSkill);
+        this.eventBus.emit({
+          type: "agent.hired",
+          agent: currentChildProfile,
+          ts: Date.now(),
+        });
 
-    // 4. For each subtask: Hire, assign, and recursively execute
-    for (const subtask of subtasks) {
-      const requiredSkill = determineSkillForTask(subtask);
-      let currentChildProfile = this.findOrHire(requiredSkill);
-      this.eventBus.emit({
-        type: "agent.hired",
-        agent: currentChildProfile,
-        ts: Date.now(),
-      });
+        subtask.ownerAgentId = currentChildProfile.id;
+        subtask.status = "assigned";
+        this.eventBus.emit({
+          type: "task.assigned",
+          taskId: subtask.id,
+          agentId: currentChildProfile.id,
+          ts: Date.now(),
+        });
 
-      subtask.ownerAgentId = currentChildProfile.id;
-      subtask.status = "assigned";
-      this.eventBus.emit({
-        type: "task.assigned",
-        taskId: subtask.id,
-        agentId: currentChildProfile.id,
-        ts: Date.now(),
-      });
+        let currentChildNode = new AgentNode(currentChildProfile, this.eventBus, this.depthLimit);
+        let childResult = await currentChildNode.handle(subtask);
 
-      let currentChildNode = new AgentNode(currentChildProfile, this.eventBus, this.depthLimit);
-      let childResult = await currentChildNode.handle(subtask);
+        // 5. Enforce 2 failures before firing based on Claude's real critique verdict
+        while (childResult.verdict === "fail") {
+          if (currentChildProfile.perf.failed >= 2) {
+            // Exactly 2 failures reached -> fire failing agent
+            currentChildProfile.status = "fired";
+            this.eventBus.emit({
+              type: "agent.fired",
+              agentId: currentChildProfile.id,
+              reason: `Repeated quality failure on task "${subtask.id}": ${childResult.verdictReason}`,
+              ts: Date.now(),
+            });
 
-      // 5. Enforce 2 failures before firing based on Claude's real critique verdict
-      while (childResult.verdict === "fail") {
-        if (currentChildProfile.perf.failed >= 2) {
-          // Exactly 2 failures reached -> fire failing agent
-          currentChildProfile.status = "fired";
-          this.eventBus.emit({
-            type: "agent.fired",
-            agentId: currentChildProfile.id,
-            reason: `Repeated quality failure on task "${subtask.id}": ${childResult.verdictReason}`,
-            ts: Date.now(),
-          });
+            // Immediately rehire replacement using findOrHire with failure feedback injected
+            const replacementProfile = this.findOrHire(requiredSkill, childResult.verdictReason);
+            this.eventBus.emit({
+              type: "agent.hired",
+              agent: replacementProfile,
+              ts: Date.now(),
+            });
 
-          // Immediately rehire replacement using findOrHire with failure feedback injected
-          const replacementProfile = this.findOrHire(requiredSkill, childResult.verdictReason);
-          this.eventBus.emit({
-            type: "agent.hired",
-            agent: replacementProfile,
-            ts: Date.now(),
-          });
+            subtask.ownerAgentId = replacementProfile.id;
+            subtask.attempt = currentChildProfile.perf.failed + 1;
+            subtask.status = "retrying";
 
-          subtask.ownerAgentId = replacementProfile.id;
-          subtask.attempt = currentChildProfile.perf.failed + 1;
-          subtask.status = "retrying";
+            this.eventBus.emit({
+              type: "task.retry",
+              taskId: subtask.id,
+              attempt: subtask.attempt,
+              feedback: `Replacement hired with directive: ${childResult.verdictReason}`,
+              ts: Date.now(),
+            });
 
-          this.eventBus.emit({
-            type: "task.retry",
-            taskId: subtask.id,
-            attempt: subtask.attempt,
-            feedback: `Replacement hired with directive: ${childResult.verdictReason}`,
-            ts: Date.now(),
-          });
+            this.eventBus.emit({
+              type: "task.assigned",
+              taskId: subtask.id,
+              agentId: replacementProfile.id,
+              ts: Date.now(),
+            });
 
-          this.eventBus.emit({
-            type: "task.assigned",
-            taskId: subtask.id,
-            agentId: replacementProfile.id,
-            ts: Date.now(),
-          });
+            // Execute replacement with forced pass to conclude retry cycle
+            const replacementNode = new AgentNode(replacementProfile, this.eventBus, this.depthLimit);
+            childResult = await replacementNode.handle(subtask, true);
+            currentChildProfile = replacementProfile;
+            break;
+          } else {
+            // First failure (perf.failed === 1): retry once with current agent
+            subtask.attempt = currentChildProfile.perf.attempted + 1;
+            subtask.status = "retrying";
 
-          // Execute replacement with forced pass to conclude retry cycle
-          const replacementNode = new AgentNode(replacementProfile, this.eventBus, this.depthLimit);
-          childResult = await replacementNode.handle(subtask, true);
-          currentChildProfile = replacementProfile;
-          break;
-        } else {
-          // First failure (perf.failed === 1): retry once with current agent
-          subtask.attempt = currentChildProfile.perf.attempted + 1;
-          subtask.status = "retrying";
+            this.eventBus.emit({
+              type: "task.retry",
+              taskId: subtask.id,
+              attempt: subtask.attempt,
+              feedback: `Attempt 1 failed: ${childResult.verdictReason}. Retrying once with current agent.`,
+              ts: Date.now(),
+            });
 
-          this.eventBus.emit({
-            type: "task.retry",
-            taskId: subtask.id,
-            attempt: subtask.attempt,
-            feedback: `Attempt 1 failed: ${childResult.verdictReason}. Retrying once with current agent.`,
-            ts: Date.now(),
-          });
-
-          childResult = await currentChildNode.handle(subtask);
+            childResult = await currentChildNode.handle(subtask);
+          }
         }
-      }
 
-      subtaskResults.push(childResult);
-    }
+        return childResult;
+      })
+    );
 
     // 6. Synthesize combined deliverables using Claude
     const combinedConfidence = +(
