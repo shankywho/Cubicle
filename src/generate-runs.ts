@@ -19,16 +19,10 @@ async function generateAllRuns() {
   const heroBrief =
     "Research the competitive landscape for modern AI code editors (analyzing Cursor, Windsurf, and GitHub Copilot Workspace), evaluate their core strengths, weaknesses, and pricing, and produce a formal decision memo with a strategic recommendation for our engineering team.";
   
+  await runJob(heroBrief, "hero-run.jsonl", 2);
   const heroPath = path.join(runsDir, "hero-run.jsonl");
-  const existingRun001 = path.join(runsDir, "run-001.jsonl");
-
-  if (fs.existsSync(existingRun001) && !fs.existsSync(heroPath)) {
-    // Leverage the verified full multi-tier execution log
-    fs.copyFileSync(existingRun001, heroPath);
-    console.log(`💾 Saved verified full org run to ${heroPath}`);
-  } else if (!fs.existsSync(heroPath)) {
-    await runJob(heroBrief, "hero-run.jsonl", 2);
-  }
+  const run001Path = path.join(runsDir, "run-001.jsonl");
+  fs.copyFileSync(heroPath, run001Path);
 
   // 2. Run 2: Simple, atomic brief (e.g., summarize a single web page) -> runs/simple-task.jsonl
   console.log("\n👉 [2/3] Executing Simple Atomic Task (Single Web Page Summary)...");
