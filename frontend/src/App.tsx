@@ -10,6 +10,7 @@ export function App() {
   const jobId = useOrgStore((state) => state.jobId);
   const reset = useOrgStore((state) => state.reset);
 
+  const [mode, setMode] = useState<"live" | "replay">("replay");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -22,20 +23,33 @@ export function App() {
       "Research the competitive landscape for modern AI code editors (analyzing Cursor, Windsurf, and GitHub Copilot Workspace), evaluate their core strengths, weaknesses, and pricing, and produce a formal decision memo with a strategic recommendation for our engineering team.";
 
     try {
-      const response = await fetch("http://localhost:3000/jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brief: dummyBrief }),
-      });
+      const url =
+        mode === "live"
+          ? "http://localhost:3000/jobs"
+          : "http://localhost:3000/replay";
+
+      const options: RequestInit =
+        mode === "live"
+          ? {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ brief: dummyBrief }),
+            }
+          : {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+            };
+
+      const response = await fetch(url, options);
 
       if (!response.ok) {
         throw new Error(`Server returned ${response.status}: ${response.statusText}`);
       }
 
       const data = await response.json();
-      console.log("Job successfully launched:", data);
+      console.log(`${mode === "live" ? "Live job" : "Replay"} launched successfully:`, data);
     } catch (err: any) {
-      console.error("Failed to start AI run:", err);
+      console.error(`Failed to start ${mode} run:`, err);
       setError(err.message || "Failed to connect to backend server");
     } finally {
       setLoading(false);
@@ -165,62 +179,139 @@ export function App() {
           </div>
         )}
 
-        <button
-          onClick={handleStartRun}
-          disabled={loading || jobStatus === "running"}
-          style={{
-            background:
-              jobStatus === "running"
-                ? "linear-gradient(135deg, #475569, #334155)"
-                : "linear-gradient(135deg, #2563eb, #7c3aed)",
-            color: "#ffffff",
-            border: "1px solid rgba(255, 255, 255, 0.15)",
-            padding: "14px 32px",
-            borderRadius: 9999,
-            fontSize: 16,
-            fontWeight: 700,
-            letterSpacing: "0.02em",
-            cursor: loading || jobStatus === "running" ? "not-allowed" : "pointer",
-            boxShadow:
-              jobStatus === "running"
-                ? "0 4px 12px rgba(0, 0, 0, 0.3)"
-                : "0 10px 25px -3px rgba(59, 130, 246, 0.5), 0 4px 6px -2px rgba(124, 58, 237, 0.3)",
-            transition: "all 0.2s ease-in-out",
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-          }}
-          onMouseEnter={(e) => {
-            if (jobStatus !== "running" && !loading) {
-              e.currentTarget.style.transform = "scale(1.04)";
-            }
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = "scale(1)";
-          }}
-        >
-          {loading ? (
-            "Initiating..."
-          ) : jobStatus === "running" ? (
-            <>
-              <span
-                style={{
-                  display: "inline-block",
-                  width: 10,
-                  height: 10,
-                  borderRadius: "50%",
-                  background: "#facc15",
-                  animation: "pulse 1.5s infinite",
-                }}
-              />
-              AI Org Working ({agents.length} Agents)
-            </>
-          ) : (
-            <>
-              <span>⚡</span> Start AI Run
-            </>
-          )}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {/* Sleek Glassmorphism Mode Toggle */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              background: "rgba(15, 23, 42, 0.8)",
+              backdropFilter: "blur(12px)",
+              border: "1px solid rgba(51, 65, 85, 0.6)",
+              borderRadius: 9999,
+              padding: 3,
+              boxShadow: "0 8px 24px rgba(0, 0, 0, 0.35)",
+            }}
+          >
+            <button
+              onClick={() => setMode("replay")}
+              disabled={loading || jobStatus === "running"}
+              style={{
+                background:
+                  mode === "replay" ? "rgba(56, 189, 248, 0.2)" : "transparent",
+                color: mode === "replay" ? "#38bdf8" : "#94a3b8",
+                border:
+                  mode === "replay"
+                    ? "1px solid rgba(56, 189, 248, 0.45)"
+                    : "1px solid transparent",
+                padding: "8px 14px",
+                borderRadius: 9999,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor:
+                  loading || jobStatus === "running" ? "not-allowed" : "pointer",
+                transition: "all 0.2s ease",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <span>🎞️</span> Replay Mode
+            </button>
+
+            <button
+              onClick={() => setMode("live")}
+              disabled={loading || jobStatus === "running"}
+              style={{
+                background:
+                  mode === "live" ? "rgba(168, 85, 247, 0.2)" : "transparent",
+                color: mode === "live" ? "#c084fc" : "#94a3b8",
+                border:
+                  mode === "live"
+                    ? "1px solid rgba(168, 85, 247, 0.45)"
+                    : "1px solid transparent",
+                padding: "8px 14px",
+                borderRadius: 9999,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor:
+                  loading || jobStatus === "running" ? "not-allowed" : "pointer",
+                transition: "all 0.2s ease",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <span>⚡</span> Live Mode
+            </button>
+          </div>
+
+          {/* Main Action Trigger Button */}
+          <button
+            onClick={handleStartRun}
+            disabled={loading || jobStatus === "running"}
+            style={{
+              background:
+                jobStatus === "running"
+                  ? "linear-gradient(135deg, #475569, #334155)"
+                  : mode === "live"
+                  ? "linear-gradient(135deg, #7c3aed, #ec4899)"
+                  : "linear-gradient(135deg, #2563eb, #0ea5e9)",
+              color: "#ffffff",
+              border: "1px solid rgba(255, 255, 255, 0.15)",
+              padding: "13px 28px",
+              borderRadius: 9999,
+              fontSize: 15,
+              fontWeight: 700,
+              letterSpacing: "0.02em",
+              cursor: loading || jobStatus === "running" ? "not-allowed" : "pointer",
+              boxShadow:
+                jobStatus === "running"
+                  ? "0 4px 12px rgba(0, 0, 0, 0.3)"
+                  : mode === "live"
+                  ? "0 10px 25px -3px rgba(168, 85, 247, 0.5)"
+                  : "0 10px 25px -3px rgba(14, 165, 233, 0.5)",
+              transition: "all 0.2s ease-in-out",
+              display: "flex",
+              alignItems: "center",
+              gap: 9,
+            }}
+            onMouseEnter={(e) => {
+              if (jobStatus !== "running" && !loading) {
+                e.currentTarget.style.transform = "scale(1.03)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = "scale(1)";
+            }}
+          >
+            {loading ? (
+              "Initiating..."
+            ) : jobStatus === "running" ? (
+              <>
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 10,
+                    height: 10,
+                    borderRadius: "50%",
+                    background: "#facc15",
+                    animation: "pulse 1.5s infinite",
+                  }}
+                />
+                AI Org Working ({agents.length} Agents)
+              </>
+            ) : mode === "live" ? (
+              <>
+                <span>⚡</span> Start Live AI Run
+              </>
+            ) : (
+              <>
+                <span>▶️</span> Start Replay (2x)
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );
