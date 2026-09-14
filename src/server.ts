@@ -130,17 +130,21 @@ app.post("/jobs", (req, res) => {
 
 /**
  * POST /replay
- * Streams pre-recorded runs/run-001.jsonl line-by-line over Socket.IO at 2x speed.
+ * Streams a pre-recorded JSONL run file line-by-line over Socket.IO at 2x speed.
+ * Accepts optional { "runFile": "hero-run.jsonl" } in the JSON body (defaults to "hero-run.jsonl").
  */
-app.post("/replay", (_req, res) => {
-  const filePath = path.resolve(process.cwd(), "runs/run-001.jsonl");
+app.post("/replay", (req, res) => {
+  const runFile = req.body?.runFile ? path.basename(req.body.runFile) : "hero-run.jsonl";
+  const filePath = path.resolve(process.cwd(), "runs", runFile);
 
   if (!fs.existsSync(filePath)) {
-    return res.status(404).json({ error: "No recorded run found at runs/run-001.jsonl" });
+    return res.status(404).json({
+      error: `Run file "${runFile}" not found in runs/ directory.`,
+    });
   }
 
-  // 6. Return { status: "replaying" } immediately to the client before the loop starts
-  res.status(202).json({ status: "replaying" });
+  // Return { status: "replaying" } immediately to the client before the loop starts
+  res.status(202).json({ status: "replaying", runFile });
 
   // Stream events line-by-line in background
   (async () => {
@@ -182,7 +186,7 @@ app.post("/replay", (_req, res) => {
         }
       }
 
-      console.log(`🎬 [Replay] Completed streaming run-001.jsonl.`);
+      console.log(`🎬 [Replay] Completed streaming ${runFile}.`);
     } catch (err) {
       console.error(`❌ [Replay] Error reading run file:`, err);
     }
