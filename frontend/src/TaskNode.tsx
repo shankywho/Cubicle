@@ -141,6 +141,22 @@ export function TaskNode({ node }: TaskNodeProps) {
           {node.description}
         </p>
 
+        {/* Instant Explainability Rationale */}
+        {node.rationale && (
+          <p
+            style={{
+              color: "#94a3b8",
+              fontStyle: "italic",
+              fontSize: 11,
+              margin: "2px 0 6px 0",
+              lineHeight: 1.35,
+              opacity: 0.9,
+            }}
+          >
+            💡 <span style={{ color: "#cbd5e1" }}>Rationale:</span> {node.rationale}
+          </p>
+        )}
+
         {/* Assigned Agent info */}
         {node.ownerAgentId && (
           <div

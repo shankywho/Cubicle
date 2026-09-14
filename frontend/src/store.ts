@@ -26,6 +26,7 @@ export interface TaskResult {
   confidence: number;
   verdict?: "pass" | "fail";
   verdictReason?: string;
+  tokens?: { prompt: number; completion: number; total: number };
 }
 
 export interface Task {
@@ -33,6 +34,7 @@ export interface Task {
   parentTaskId: string | null;
   ownerAgentId: string | null;
   description: string;
+  rationale?: string;
   status: "pending" | "decomposed" | "assigned" | "in_progress" | "completed" | "failed" | "retrying";
   depth: number;
   subtaskIds: string[];
@@ -57,12 +59,14 @@ export type OrgEvent =
   | { type: "agent.hired"; agent: Agent; ts: number }
   | { type: "agent.fired"; agentId: string; reason: string; ts: number }
   | { type: "task.created"; task: Task; ts: number }
-  | { type: "task.decomposed"; taskId: string; subtaskIds: string[]; ts: number }
+  | { type: "task.decomposed"; taskId: string; subtaskIds: string[]; rationale?: string; ts: number }
   | { type: "task.assigned"; taskId: string; agentId: string; ts: number }
   | { type: "task.started"; taskId: string; ts: number }
   | { type: "task.result"; taskId: string; result: TaskResult; ts: number }
   | { type: "task.retry"; taskId: string; attempt: number; feedback: string; ts: number }
   | { type: "message"; fromAgentId: string; toAgentId?: string; content: string; ts: number }
+  | { type: "tool.invoked"; agentId: string; toolName: string; args: Record<string, any>; ts: number }
+  | { type: "tool.result"; agentId: string; toolName: string; summary: string; ts: number }
   | { type: "job.completed"; jobId: string; finalResult: TaskResult; ts: number };
 
 interface OrgStore {
@@ -71,6 +75,7 @@ interface OrgStore {
   messages: AgentMessage[];
   events: OrgEvent[];
   connected: boolean;
+  totalTokens: number;
   jobId: string | null;
   jobStatus: "idle" | "running" | "completed";
   addAgent: (agent: Agent) => void;
@@ -88,6 +93,7 @@ export const useOrgStore = create<OrgStore>((set) => ({
   messages: [],
   events: [],
   connected: false,
+  totalTokens: 0,
   jobId: null,
   jobStatus: "idle",
 
@@ -130,6 +136,7 @@ export const useOrgStore = create<OrgStore>((set) => ({
       agents: [],
       tasks: [],
       messages: [],
+      totalTokens: 0,
       jobStatus: "idle",
       jobId: null,
     }),
@@ -140,6 +147,7 @@ export const useOrgStore = create<OrgStore>((set) => ({
       tasks: [],
       messages: [],
       events: [],
+      totalTokens: 0,
       jobStatus: "idle",
       jobId: null,
     }),
@@ -243,6 +251,7 @@ socket.on("orgEvent", (event: OrgEvent) => {
       store.updateTask(event.taskId, {
         status: "decomposed",
         subtaskIds: event.subtaskIds,
+        rationale: event.rationale,
       });
       break;
 
@@ -268,6 +277,11 @@ socket.on("orgEvent", (event: OrgEvent) => {
         result: event.result,
         status: event.result.verdict === "pass" ? "completed" : "failed",
       });
+      if (event.result.tokens?.total) {
+        useOrgStore.setState((state) => ({
+          totalTokens: state.totalTokens + (event.result.tokens?.total || 0),
+        }));
+      }
       const currentTask = store.tasks.find((t) => t.id === event.taskId);
       if (currentTask?.ownerAgentId) {
         store.addMessage({

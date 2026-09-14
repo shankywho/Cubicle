@@ -8,6 +8,7 @@ export function App() {
   const agents = useOrgStore((state) => state.agents);
   const jobStatus = useOrgStore((state) => state.jobStatus);
   const jobId = useOrgStore((state) => state.jobId);
+  const totalTokens = useOrgStore((state) => state.totalTokens);
   const reset = useOrgStore((state) => state.reset);
 
   const [mode, setMode] = useState<"live" | "replay">("replay");
@@ -349,6 +350,96 @@ export function App() {
               </>
             )}
           </button>
+        </div>
+      </div>
+
+      {/* 3. Glassmorphism "Telemetry & Guardrails" HUD in bottom-left corner over 3D scene */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: 24,
+          left: 24,
+          background: "rgba(15, 23, 42, 0.8)",
+          backdropFilter: "blur(14px)",
+          WebkitBackdropFilter: "blur(14px)",
+          border: "1px solid rgba(51, 65, 85, 0.65)",
+          borderRadius: 12,
+          padding: "12px 16px",
+          boxShadow: "0 12px 28px -6px rgba(0, 0, 0, 0.45)",
+          pointerEvents: "auto",
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+          fontSize: 12,
+          color: "#e2e8f0",
+          minWidth: 210,
+          zIndex: 20,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: "0.05em",
+            textTransform: "uppercase",
+            color: "#38bdf8",
+            borderBottom: "1px solid rgba(51, 65, 85, 0.5)",
+            paddingBottom: 6,
+            marginBottom: 2,
+          }}
+        >
+          <span>🛡️</span>
+          <span>Telemetry & Guardrails</span>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <span style={{ color: "#94a3b8" }}>⚬ Live Tokens:</span>
+          <span style={{ fontWeight: 600, color: "#f8fafc", fontFamily: "monospace" }}>
+            {totalTokens.toLocaleString()}
+          </span>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <span style={{ color: "#94a3b8" }}>⚬ Est. API Cost:</span>
+          <span style={{ fontWeight: 600, color: "#34d399", fontFamily: "monospace" }}>
+            ${((totalTokens / 1000) * 0.0008).toFixed(4)}
+          </span>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <span style={{ color: "#94a3b8" }}>⚬ Max Depth:</span>
+          <span
+            style={{
+              fontWeight: 600,
+              color: "#c084fc",
+              background: "rgba(192, 132, 252, 0.12)",
+              padding: "1px 6px",
+              borderRadius: 4,
+              fontSize: 11,
+            }}
+          >
+            2 (Static guardrail)
+          </span>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <span style={{ color: "#94a3b8" }}>⚬ Governance:</span>
+          <span
+            style={{
+              fontWeight: 600,
+              color: "#fbbf24",
+              background: "rgba(251, 191, 36, 0.12)",
+              padding: "1px 6px",
+              borderRadius: 4,
+              fontSize: 11,
+              whiteSpace: "nowrap",
+            }}
+          >
+            Reflexion → Fire
+          </span>
         </div>
       </div>
     </div>
