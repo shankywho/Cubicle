@@ -4,16 +4,26 @@ import fs from "node:fs";
 import path from "node:path";
 import { AgentNode } from "./agent.js";
 import { EventBus } from "./eventBus.js";
-import type { Agent, OrgEvent, Task } from "./types.js";
+import type { Agent, OrgEvent, Task, TaskResult } from "./types.js";
 
-async function main() {
+/**
+ * Universal job executor that initializes the CEO Agent, event bus,
+ * processes the brief through the recursive org hierarchy, and captures
+ * the resulting event stream into runs/<filename>.
+ */
+export async function runJob(
+  brief: string,
+  filename: string,
+  depthLimit: number = 2
+): Promise<TaskResult> {
   console.log("===============================================================");
-  console.log("🚀 Starting Autonomous AI Org: Orchestrator Simulation");
+  console.log(`🚀 Starting Autonomous AI Org Run: "${brief.slice(0, 60)}..."`);
+  console.log(`🎯 Target Output File: runs/${filename}`);
   console.log("===============================================================\n");
 
   const eventBus = new EventBus();
 
-  // Reset log file for a clean simulation trace
+  // Reset log file for a clean run trace
   eventBus.clearLog();
 
   // Format terminal events cleanly as they occur
@@ -54,12 +64,13 @@ async function main() {
           `\x1b[31m[${time}] [RETRY #${event.attempt}]\x1b[0m Task (${event.taskId}) feedback: "${event.feedback}"`
         );
         break;
-      case "task.result":
+      case "task.result": {
         const verdictColor = event.result.verdict === "pass" ? "\x1b[32m" : "\x1b[31m";
         console.log(
           `${verdictColor}[${time}] [TASK RESULT]\x1b[0m Task (${event.taskId}): Verdict=${event.result.verdict} (Confidence: ${event.result.confidence})`
         );
         break;
+      }
       case "job.completed":
         console.log(`\n\x1b[32m[${time}] [JOB COMPLETED]\x1b[0m Job ID: ${event.jobId}`);
         console.log(`\x1b[1mFinal Result Summary:\x1b[0m ${event.finalResult.summary}`);
@@ -79,19 +90,18 @@ async function main() {
     perf: { attempted: 0, failed: 0, avgConfidence: 1.0 },
   };
 
+  const jobId = `job-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+
   const rootTask: Task = {
-    id: "task-root-001",
+    id: `task-root-${jobId}`,
     parentTaskId: null,
     ownerAgentId: ceoAgent.id,
-    description:
-      "Research the competitive landscape for modern AI code editors (analyzing Cursor, Windsurf, and GitHub Copilot Workspace), evaluate their core strengths, weaknesses, and pricing, and produce a formal decision memo with a strategic recommendation for our engineering team.",
+    description: brief,
     status: "pending",
     depth: 0,
     subtaskIds: [],
     attempt: 1,
   };
-
-  const jobId = "job-demo-001";
 
   // 1. Emit job.started
   eventBus.emit({
@@ -102,7 +112,7 @@ async function main() {
   });
 
   // 2. Initialize CEO node and handle root task
-  const ceoNode = new AgentNode(ceoAgent, eventBus, 2);
+  const ceoNode = new AgentNode(ceoAgent, eventBus, depthLimit);
   const finalResult = await ceoNode.handle(rootTask);
 
   // 3. Emit job.completed
@@ -113,22 +123,33 @@ async function main() {
     ts: Date.now(),
   });
 
-  // 4. Capture real end-to-end Groq run into runs/run-001.jsonl
+  // 4. Save to specified filename in runs/
   const runsDir = path.resolve(process.cwd(), "runs");
   if (!fs.existsSync(runsDir)) {
     fs.mkdirSync(runsDir, { recursive: true });
   }
-  const runFilePath = path.join(runsDir, "run-001.jsonl");
+  const runFilePath = path.join(runsDir, filename);
   fs.copyFileSync(eventBus.getLogPath(), runFilePath);
 
   console.log("\n===============================================================");
   console.log(`✅ Simulation successfully executed!`);
   console.log(`📝 Event log written to: ${eventBus.getLogPath()}`);
-  console.log(`💾 Captured real end-to-end run saved to: ${runFilePath}`);
+  console.log(`💾 Captured run saved to: ${runFilePath}`);
   console.log("===============================================================\n");
+
+  return finalResult;
 }
 
-main().catch((err) => {
-  console.error("Simulation error:", err);
-  process.exit(1);
-});
+async function main() {
+  const defaultBrief =
+    "Research the competitive landscape for modern AI code editors (analyzing Cursor, Windsurf, and GitHub Copilot Workspace), evaluate their core strengths, weaknesses, and pricing, and produce a formal decision memo with a strategic recommendation for our engineering team.";
+  await runJob(defaultBrief, "run-001.jsonl", 2);
+}
+
+const isMain = process.argv[1]?.includes("simulate");
+if (isMain) {
+  main().catch((err) => {
+    console.error("Simulation error:", err);
+    process.exit(1);
+  });
+}
