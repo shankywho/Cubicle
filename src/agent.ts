@@ -1,7 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { EventBus } from "./eventBus.js";
-import { critiqueTask, decomposeTask, executeTask, synthesizeSkillTemplate } from "./llm.js";
+import {
+  critiqueTask,
+  decomposeTask,
+  executeTask,
+  reflectOnFailure,
+  synthesizeSkillTemplate,
+} from "./llm.js";
 import type { Agent, SkillTemplate, Task, TaskResult } from "./types.js";
 
 let deskCounter = 1;
@@ -202,6 +208,15 @@ export class AgentNode {
       execResult.verdict = critique.verdict;
       execResult.verdictReason = critique.reason;
 
+      // 1. In handle(), aggregate the tokens from execution and critique
+      const execTokens = execResult.tokens || { prompt: 0, completion: 0, total: 0 };
+      const critiqueTokens = critique.tokens || { prompt: 0, completion: 0, total: 0 };
+      execResult.tokens = {
+        prompt: execTokens.prompt + critiqueTokens.prompt,
+        completion: execTokens.completion + critiqueTokens.completion,
+        total: execTokens.total + critiqueTokens.total,
+      };
+
       if (critique.verdict === "pass") {
         task.status = "completed";
       } else {
@@ -237,8 +252,10 @@ export class AgentNode {
       return execResult;
     }
 
-    // 3. Manager Agent: Task decomposition using Claude
-    const subtaskDescriptions = await decomposeTask(task.description);
+    // 3. Manager Agent: Task decomposition using Groq
+    const decomposed = await decomposeTask(task.description);
+    const subtaskDescriptions = decomposed.subtasks || decomposed;
+    const rationale = decomposed.rationale;
     const subtasks: Task[] = subtaskDescriptions.map((desc, idx) => ({
       id: `task-${task.id}-sub${idx + 1}`,
       parentTaskId: task.id,
@@ -262,11 +279,12 @@ export class AgentNode {
       });
     });
 
-    // Emit decomposition event
+    // Emit decomposition event with explainability rationale
     this.eventBus.emit({
       type: "task.decomposed",
       taskId: task.id,
       subtaskIds: task.subtaskIds,
+      rationale,
       ts: Date.now(),
     });
 
@@ -347,7 +365,23 @@ export class AgentNode {
             currentChildNode = replacementNode;
             break;
           } else {
-            // First failure (perf.failed === 1): retry once with current agent
+            // On attempt 1, do not fire the agent. Instead, await reflectOnFailure().
+            const reflection = await reflectOnFailure(
+              subtask.description,
+              childResult.summary,
+              childResult.verdictReason || "Task failed quality critique."
+            );
+
+            // Emit a message event from the agent saying "Self-Correction: [reflection]"
+            this.eventBus.emit({
+              type: "message",
+              fromAgentId: currentChildNode.profile.id,
+              toAgentId: this.profile.id,
+              content: `Self-Correction: ${reflection}`,
+              ts: Date.now(),
+            });
+
+            // Append this reflection to the task feedback and retry the same agent
             subtask.attempt = currentChildNode.profile.perf.attempted + 1;
             subtask.status = "retrying";
 
@@ -355,7 +389,7 @@ export class AgentNode {
               type: "task.retry",
               taskId: subtask.id,
               attempt: subtask.attempt,
-              feedback: `Attempt 1 failed: ${childResult.verdictReason}. Retrying once with current agent.`,
+              feedback: `Attempt 1 failed: ${childResult.verdictReason}. Self-Correction: ${reflection}`,
               ts: Date.now(),
             });
 
@@ -385,6 +419,7 @@ export class AgentNode {
           ref: `ref://synthesis/${task.id}-summary.md`,
         },
       ],
+      tokens: synthesisResult.tokens,
     };
 
     task.status = "completed";
