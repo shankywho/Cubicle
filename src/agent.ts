@@ -217,6 +217,16 @@ export class AgentNode {
         ts: Date.now(),
       });
 
+      if (this.profile.parentAgentId) {
+        this.eventBus.emit({
+          type: "message",
+          fromAgentId: this.profile.id,
+          toAgentId: this.profile.parentAgentId,
+          content: `Completed with verdict: ${execResult.verdict || "pass"}.`,
+          ts: Date.now(),
+        });
+      }
+
       this.profile.status = "idle";
       return execResult;
     }
@@ -269,6 +279,15 @@ export class AgentNode {
           ts: Date.now(),
         });
 
+        // 1. Emit delegation message from parent to child
+        this.eventBus.emit({
+          type: "message",
+          fromAgentId: this.profile.id,
+          toAgentId: currentChildNode.profile.id,
+          content: `I need you to handle: "${subtask.description}"`,
+          ts: Date.now(),
+        });
+
         let childResult = await currentChildNode.handle(subtask);
 
         // 5. Enforce 2 failures before firing based on Claude's real critique verdict
@@ -306,6 +325,14 @@ export class AgentNode {
               type: "task.assigned",
               taskId: subtask.id,
               agentId: replacementNode.profile.id,
+              ts: Date.now(),
+            });
+
+            this.eventBus.emit({
+              type: "message",
+              fromAgentId: this.profile.id,
+              toAgentId: replacementNode.profile.id,
+              content: `I need you to handle: "${subtask.description}"`,
               ts: Date.now(),
             });
 
@@ -363,6 +390,16 @@ export class AgentNode {
       result: finalResult,
       ts: Date.now(),
     });
+
+    if (this.profile.parentAgentId) {
+      this.eventBus.emit({
+        type: "message",
+        fromAgentId: this.profile.id,
+        toAgentId: this.profile.parentAgentId,
+        content: `Completed with verdict: ${finalResult.verdict || "pass"}.`,
+        ts: Date.now(),
+      });
+    }
 
     this.profile.status = "idle";
     return finalResult;
