@@ -195,6 +195,10 @@ socket.on("disconnect", () => {
   useOrgStore.setState({ connected: false });
 });
 
+socket.on("connect_error", () => {
+  useOrgStore.setState({ connected: false });
+});
+
 // Real-time listener for typed org events
 socket.on("orgEvent", (event: OrgEvent) => {
   const store = useOrgStore.getState();

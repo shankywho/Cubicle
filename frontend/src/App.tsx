@@ -11,6 +11,7 @@ export function App() {
   const reset = useOrgStore((state) => state.reset);
 
   const [mode, setMode] = useState<"live" | "replay">("replay");
+  const [selectedRun, setSelectedRun] = useState<string>("hero-run.jsonl");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,6 +39,7 @@ export function App() {
           : {
               method: "POST",
               headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ runFile: selectedRun }),
             };
 
       const response = await fetch(url, options);
@@ -113,7 +115,11 @@ export function App() {
               display: "inline-flex",
               alignItems: "center",
               gap: 6,
-              color: connected ? "#4ade80" : "#f87171",
+              color: connected ? "#4ade80" : "#ef4444",
+              background: connected ? "transparent" : "rgba(239, 68, 68, 0.15)",
+              padding: connected ? "0" : "2px 8px",
+              borderRadius: connected ? 0 : 6,
+              border: connected ? "none" : "1px solid rgba(239, 68, 68, 0.4)",
             }}
           >
             <span
@@ -122,10 +128,10 @@ export function App() {
                 height: 8,
                 borderRadius: "50%",
                 background: connected ? "#22c55e" : "#ef4444",
-                boxShadow: connected ? "0 0 8px #22c55e" : "none",
+                boxShadow: connected ? "0 0 8px #22c55e" : "0 0 8px #ef4444",
               }}
             />
-            {connected ? "Live Stream" : "Disconnected"}
+            {connected ? "Live Stream" : "Offline"}
           </span>
 
           <span style={{ color: "#475569" }}>•</span>
@@ -245,6 +251,38 @@ export function App() {
               <span>⚡</span> Live Mode
             </button>
           </div>
+
+          {/* Glassmorphism Run Selector Dropdown for Replay Mode */}
+          {mode === "replay" && (
+            <select
+              value={selectedRun}
+              onChange={(e) => setSelectedRun(e.target.value)}
+              disabled={loading || jobStatus === "running"}
+              style={{
+                background: "rgba(15, 23, 42, 0.85)",
+                backdropFilter: "blur(12px)",
+                border: "1px solid rgba(56, 189, 248, 0.5)",
+                color: "#38bdf8",
+                padding: "9px 16px",
+                borderRadius: 9999,
+                fontSize: 13,
+                fontWeight: 600,
+                outline: "none",
+                cursor: loading || jobStatus === "running" ? "not-allowed" : "pointer",
+                boxShadow: "0 8px 24px rgba(0, 0, 0, 0.35)",
+              }}
+            >
+              <option value="hero-run.jsonl" style={{ background: "#0f172a", color: "#f8fafc" }}>
+                🌳 hero-run.jsonl
+              </option>
+              <option value="simple-task.jsonl" style={{ background: "#0f172a", color: "#f8fafc" }}>
+                ⚡ simple-task.jsonl
+              </option>
+              <option value="rehire-test.jsonl" style={{ background: "#0f172a", color: "#f8fafc" }}>
+                🔄 rehire-test.jsonl
+              </option>
+            </select>
+          )}
 
           {/* Main Action Trigger Button */}
           <button
