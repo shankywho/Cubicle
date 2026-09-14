@@ -41,17 +41,48 @@ async function withRateLimitRetry<T>(fn: () => Promise<T>, maxRetries = 3): Prom
 }
 
 /**
- * Safely parse JSON from a response string, extracting curly braces if needed.
+ * Safely parse JSON from a response string, extracting curly braces or brackets if needed,
+ * stripping model thinking blocks (<think>...</think>), and ignoring markdown wrappers.
  */
-function safeParseJson<T>(raw: string): T {
+export function safeParseJson<T>(raw: string): T {
+  // 1. Strip out any reasoning blocks (e.g., <think>...</think>)
+  const cleaned = raw
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<think>[\s\S]*$/gi, "")
+    .trim();
+
+  // Direct parse attempt
   try {
-    return JSON.parse(raw) as T;
+    return JSON.parse(cleaned) as T;
   } catch {
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (match) {
-      return JSON.parse(match[0]) as T;
+    // 2. Use regex to extract only the JSON payload, ignoring surrounding markdown or conversational text
+    const objectMatch = cleaned.match(/\{[\s\S]*\}/);
+    const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
+
+    let candidate = "";
+    if (objectMatch && arrayMatch) {
+      const objIndex = cleaned.indexOf(objectMatch[0]);
+      const arrIndex = cleaned.indexOf(arrayMatch[0]);
+      candidate = objIndex <= arrIndex ? objectMatch[0] : arrayMatch[0];
+    } else if (objectMatch) {
+      candidate = objectMatch[0];
+    } else if (arrayMatch) {
+      candidate = arrayMatch[0];
     }
-    throw new Error(`Failed to parse JSON: ${raw}`);
+
+    if (candidate) {
+      try {
+        // 3. Attempt JSON.parse on the extracted string
+        return JSON.parse(candidate) as T;
+      } catch (innerErr: any) {
+        throw new Error(
+          `Failed to parse extracted JSON payload: ${innerErr.message}. Payload: ${candidate}`
+        );
+      }
+    }
+
+    // Throw clear error if extraction/parsing still fails so orchestrator can catch it
+    throw new Error(`Failed to extract and parse JSON from model output: "${raw}"`);
   }
 }
 
